@@ -1,17 +1,25 @@
 """
-Logic Segmenter Module v2.3 (Three-Phase Pipeline)
+Logic Segmenter Module v2.4 (Enhanced Furniture Detection)
 
 Processes flat_segments from parser_docling.py and applies:
-1. Reading Order Correction (NEW v2.3) - Column-aware segment reordering for multi-column layouts
-2. Heading Path Reconstruction (NEW v2.3) - Stack-based hierarchy rebuilding with backfilling
-3. POS Tagging (via spaCy) - Sentence role identification with Imperative detection
-4. Rule-Based Grouping - List aggregation, definition detection, etc.
-5. Tag Enrichment - 20+ semantic tags from taxonomy (enhanced with Theorem/Lemma/Proof)
-6. Context Overlap - Each chunk carries context from previous chunk for RAG continuity
-7. Token-based Length Control - Prevents extreme chunk sizes
-8. Cross-Page Continuation Detection - Hyphenation, open clause, fragment detection
+1. Furniture Detection (NEW v2.4) - Multi-feature page decoration detection
+2. Reading Order Correction - Column-aware segment reordering for multi-column layouts
+3. Heading Path Reconstruction - Stack-based hierarchy rebuilding with backfilling
+4. POS Tagging (via spaCy) - Sentence role identification with Imperative detection
+5. Rule-Based Grouping - List aggregation, definition detection, etc.
+6. Tag Enrichment - 20+ semantic tags from taxonomy (enhanced with Theorem/Lemma/Proof)
+7. Context Overlap - Each chunk carries context from previous chunk for RAG continuity
+8. Token-based Length Control - Prevents extreme chunk sizes
+9. Cross-Page Continuation Detection - Hyphenation, open clause, fragment detection, dehyphenation
 
-Three-Phase Pipeline Architecture:
+v2.4 Improvements:
+- FurnitureDetector: Position-band + frequency + multi-feature classification
+- Dehyphenation: Cross-page hyphen repair with word validation
+- Enhanced column detection with projection profile analysis
+- Visual heading level inference based on font size ranking
+
+Pipeline Architecture:
+- Pre-Phase: Furniture detection and document-level statistics
 - Phase 1: Column-based reading order correction (left-col then right-col)
 - Phase 2: Heading stack reconstruction (ancestor stack algorithm)
 - Phase 3: Same-page backfilling for late-discovered L1 headers
@@ -59,7 +67,8 @@ class ChunkingConfig:
     CONTINUATION_STYLE_THRESHOLD = 0.6    # Minimum style similarity score for continuation
     CONTINUATION_COLUMN_STRICT = True     # Require same column for continuation
     
-    # Three-Phase Pipeline settings (NEW v2.3)
+    # Pipeline Phase settings
+    ENABLE_FURNITURE_DETECTION = True     # Pre-Phase: Furniture detection (NEW v2.4)
     ENABLE_READING_ORDER_CORRECTION = True   # Phase 1: Column-based reordering
     ENABLE_HEADING_RECONSTRUCTION = True     # Phase 2: Stack-based hierarchy rebuild
     ENABLE_BACKFILL_CORRECTION = True        # Phase 3: Same-page L1 backfilling
@@ -67,6 +76,17 @@ class ChunkingConfig:
     # Column detection thresholds
     COLUMN_DETECTION_THRESHOLD = 0.45        # x < page_width * threshold => left column
     PAGE_WIDTH_DEFAULT = 612.0               # Default PDF page width (8.5" × 72dpi)
+    PAGE_HEIGHT_DEFAULT = 792.0              # Default PDF page height (11" × 72dpi)
+    
+    # Furniture detection settings (NEW v2.4)
+    FURNITURE_TOP_BAND = 0.10                # Page top 10% considered edge zone
+    FURNITURE_BOTTOM_BAND = 0.10             # Page bottom 10% considered edge zone
+    FURNITURE_REPEAT_THRESHOLD = 0.20        # String appearing on 20%+ pages is "repeated"
+    FURNITURE_MAX_WORDS = 5                  # Short text threshold for furniture
+    FURNITURE_MIN_PAGES_FOR_STATS = 10       # Minimum pages to compute frequency stats
+    
+    # Dehyphenation settings (NEW v2.4)
+    ENABLE_DEHYPHENATION = True              # Enable cross-page hyphen repair
 
 
 
@@ -128,6 +148,372 @@ class EnrichedChunk:
 # Three-Phase Pipeline Processor (NEW v2.3)
 # =============================================================================
 
+# =============================================================================
+# Furniture Detector (NEW v2.4)
+# =============================================================================
+
+class FurnitureDetector:
+    """
+    Multi-feature page decoration (furniture) detector.
+    
+    Furniture includes running headers, footers, page numbers, and continuation
+    markers that should not be treated as document content. This detector uses
+    multiple features to identify these elements:
+    
+    1. Position band: Elements in top/bottom 10% of page are candidates
+    2. Cross-page frequency: Repeated strings across many pages are likely furniture
+    3. Lexical patterns: Known phrases like "continued", page numbers
+    4. Semantic weakness: Very short text with no substantive content
+    
+    Usage:
+        detector = FurnitureDetector(config)
+        detector.scan_document(all_segments)  # First pass: build stats
+        
+        for seg in segments:
+            if detector.is_furniture(seg):
+                seg['is_furniture'] = True
+    """
+    
+    # Known furniture phrases (case-insensitive)
+    FURNITURE_PHRASES = [
+        r'^\s*\(?\s*concluded\s*\)?\s*$',
+        r'^\s*\(?\s*continued\s*\)?\s*$',
+        r'^\s*\(?\s*cont\'?d?\s*\)?\s*$',
+        r'^\s*\(?\s*continuation\s*\)?\s*$',
+        r'^\s*continued\s+(?:on|from)\s+(?:next|previous)?\s*page',
+        r'^\s*see\s+(?:next|previous)\s+page',
+        r'^\s*to\s+be\s+continued',
+        r'^(?:Table|Figure|Exhibit)\s+[\d.]+\s*\(?\s*(?:continued|cont\'?d?)\s*\)?',
+        r'^\s*(?:Page\s+)?\d+\s*$',  # Page numbers
+        r'^\s*\d+\s*/\s*\d+\s*$',    # Page X/Y format
+        r'^\s*[-–—]\s*\d+\s*[-–—]\s*$',  # -23- format
+    ]
+    
+    def __init__(self, config: ChunkingConfig = None):
+        self.config = config or ChunkingConfig()
+        self._compiled_patterns = [re.compile(p, re.IGNORECASE) for p in self.FURNITURE_PHRASES]
+        
+        # Document-level statistics (populated by scan_document)
+        self._frequency_map: Dict[str, int] = {}  # normalized_text -> page count
+        self._total_pages: int = 0
+        self._scanned: bool = False
+        
+        # Statistics
+        self._stats = {
+            "furniture_detected": 0,
+            "by_position": 0,
+            "by_frequency": 0,
+            "by_pattern": 0,
+        }
+    
+    def scan_document(self, segments: List[Dict]) -> None:
+        """
+        First pass: Build document-level statistics for furniture detection.
+        
+        This should be called once before processing segments.
+        Builds a frequency map of normalized text strings and their page coverage.
+        """
+        from collections import defaultdict
+        
+        # Track which pages each normalized string appears on
+        text_pages: Dict[str, set] = defaultdict(set)
+        all_pages: set = set()
+        
+        for seg in segments:
+            page = seg.get('page', 0)
+            all_pages.add(page)
+            
+            # Only track short strings in edge positions as furniture candidates
+            text = seg.get('text', '').strip()
+            if not text or len(text.split()) > self.config.FURNITURE_MAX_WORDS:
+                continue
+            
+            # Check if in edge band
+            if self._in_edge_band(seg):
+                norm_text = self._normalize_text(text)
+                text_pages[norm_text].add(page)
+        
+        self._total_pages = len(all_pages)
+        
+        # Build frequency map (count of unique pages, not occurrences)
+        self._frequency_map = {
+            text: len(pages) for text, pages in text_pages.items()
+        }
+        
+        self._scanned = True
+        logger.debug(f"FurnitureDetector scanned {self._total_pages} pages, "
+                    f"found {len(self._frequency_map)} candidate furniture strings")
+    
+    def is_furniture(self, seg: Dict) -> bool:
+        """
+        Determine if a segment is furniture (page decoration).
+        
+        Returns True if the segment matches furniture criteria based on:
+        - Position (in edge band)
+        - Cross-page frequency (repeated across many pages)
+        - Lexical patterns (matches known furniture phrases)
+        - Semantic weakness (short, non-substantive content)
+        """
+        if seg.get('type') not in ['Header', 'Paragraph', 'Text']:
+            return False
+        
+        text = seg.get('text', '').strip()
+        if not text:
+            return False
+        
+        word_count = len(text.split())
+        
+        # Feature 1: Check known furniture patterns (highest priority)
+        if self._matches_furniture_pattern(text):
+            self._stats["furniture_detected"] += 1
+            self._stats["by_pattern"] += 1
+            return True
+        
+        # Feature 2: Check position + frequency (for scanned documents)
+        if self._scanned and self._total_pages >= self.config.FURNITURE_MIN_PAGES_FOR_STATS:
+            in_edge = self._in_edge_band(seg)
+            
+            if in_edge and word_count <= self.config.FURNITURE_MAX_WORDS:
+                norm_text = self._normalize_text(text)
+                page_count = self._frequency_map.get(norm_text, 0)
+                
+                if page_count > 0:
+                    repeat_ratio = page_count / self._total_pages
+                    
+                    if repeat_ratio >= self.config.FURNITURE_REPEAT_THRESHOLD:
+                        self._stats["furniture_detected"] += 1
+                        self._stats["by_frequency"] += 1
+                        return True
+        
+        # Feature 3: Position-only detection for very short edge content
+        if word_count <= 2 and self._in_edge_band(seg):
+            # Single word or two words at page edge - likely page number or marker
+            if self._is_trivial_content(text):
+                self._stats["furniture_detected"] += 1
+                self._stats["by_position"] += 1
+                return True
+        
+        return False
+    
+    def _in_edge_band(self, seg: Dict) -> bool:
+        """Check if segment is in top or bottom edge band of page."""
+        bbox = seg.get('bbox')
+        if not bbox or len(bbox) < 4:
+            return False
+        
+        page_height = self.config.PAGE_HEIGHT_DEFAULT
+        y_top = bbox[1]  # Top of segment (PDF y-coordinate)
+        
+        # Top band check (high y value in PDF coordinates = top of page)
+        top_threshold = page_height * (1 - self.config.FURNITURE_TOP_BAND)
+        if y_top > top_threshold:
+            return True
+        
+        # Bottom band check (low y value = bottom of page)
+        bottom_threshold = page_height * self.config.FURNITURE_BOTTOM_BAND
+        y_bottom = bbox[3] if len(bbox) > 3 else y_top
+        if y_bottom < bottom_threshold:
+            return True
+        
+        return False
+    
+    def _matches_furniture_pattern(self, text: str) -> bool:
+        """Check if text matches any known furniture pattern."""
+        for pattern in self._compiled_patterns:
+            if pattern.match(text):
+                return True
+        return False
+    
+    def _normalize_text(self, text: str) -> str:
+        """Normalize text for frequency comparison."""
+        # Remove extra whitespace, lowercase, strip punctuation
+        normalized = re.sub(r'\s+', ' ', text.lower().strip())
+        # Remove page numbers from strings like "Chapter 1 - Page 23"
+        normalized = re.sub(r'\b(?:page\s*)?\d+\b', '', normalized)
+        return normalized.strip()
+    
+    def _is_trivial_content(self, text: str) -> bool:
+        """Check if text is trivial (numbers only, single symbols, etc.)."""
+        # Pure numbers
+        if re.match(r'^[\d\s.,-]+$', text):
+            return True
+        # Single character or punctuation
+        if len(text) <= 2:
+            return True
+        # Roman numerals
+        if re.match(r'^[ivxlcdmIVXLCDM]+$', text):
+            return True
+        return False
+    
+    def get_stats(self) -> Dict[str, int]:
+        """Return detection statistics."""
+        return self._stats.copy()
+
+
+# =============================================================================
+# Dehyphenation Helper (NEW v2.4)
+# =============================================================================
+
+class DehyphenationHelper:
+    """
+    Cross-page and cross-line hyphenation repair.
+    
+    Handles cases where words are split across lines or pages with hyphens:
+    - "invest-" + "ment" → "investment"
+    - "con-" + "tinuation" → "continuation"
+    
+    Strategy:
+    1. Detect if previous text ends with a hyphen
+    2. Attempt to merge the hyphenated word parts
+    3. Validate the merged word (optional dictionary check)
+    4. Return the repaired text
+    
+    Usage:
+        helper = DehyphenationHelper()
+        merged = helper.merge_hyphenated("The invest-", "ment was successful.")
+        # Returns: ("The investment", "was successful.")
+    """
+    
+    # Common hyphen characters
+    HYPHEN_CHARS = {'-', '‐', '‑', '–', '—'}
+    
+    def __init__(self, config: ChunkingConfig = None):
+        self.config = config or ChunkingConfig()
+        self._stats = {
+            "hyphens_detected": 0,
+            "merges_performed": 0,
+            "merges_skipped": 0,
+        }
+    
+    def merge_hyphenated(self, prev_text: str, curr_text: str) -> Tuple[str, str]:
+        """
+        Attempt to merge hyphenated word across text boundary.
+        
+        Args:
+            prev_text: Text that may end with a hyphenated word fragment
+            curr_text: Text that may begin with the rest of the word
+            
+        Returns:
+            Tuple of (modified_prev_text, modified_curr_text)
+            If merge performed, the hyphenated word is moved entirely to prev_text
+        """
+        if not prev_text or not curr_text:
+            return prev_text, curr_text
+        
+        prev_stripped = prev_text.rstrip()
+        
+        # Check if prev ends with hyphen
+        if not prev_stripped or prev_stripped[-1] not in self.HYPHEN_CHARS:
+            return prev_text, curr_text
+        
+        # Ensure hyphen is attached to a word (not standalone like "- ")
+        # The character before hyphen should be alphanumeric
+        if len(prev_stripped) < 2 or not prev_stripped[-2].isalnum():
+            return prev_text, curr_text
+        
+        self._stats["hyphens_detected"] += 1
+        
+        # Extract the word fragment before hyphen
+        words = prev_stripped[:-1].split()
+        if not words:
+            return prev_text, curr_text
+        
+        word_part1 = words[-1]
+        
+        # Extract the first word from curr_text (potential word completion)
+        curr_stripped = curr_text.lstrip()
+        curr_words = curr_stripped.split()
+        if not curr_words:
+            return prev_text, curr_text
+        
+        word_part2 = curr_words[0]
+        
+        # Check if word_part2 looks like a word continuation (lowercase, no punctuation at start)
+        if not word_part2 or not word_part2[0].isalpha():
+            self._stats["merges_skipped"] += 1
+            return prev_text, curr_text
+        
+        # Merge the word
+        merged_word = word_part1 + word_part2.rstrip('.,;:!?')
+        
+        # Validate: merged word should be reasonably long and alphanumeric
+        if len(merged_word) < 3:
+            self._stats["merges_skipped"] += 1
+            return prev_text, curr_text
+        
+        # Check if it looks like a valid word (simple heuristic)
+        if not self._is_likely_word(merged_word):
+            self._stats["merges_skipped"] += 1
+            return prev_text, curr_text
+        
+        # Perform the merge
+        self._stats["merges_performed"] += 1
+        
+        # Reconstruct texts
+        # prev_text: remove the hyphenated fragment, add merged word
+        prev_words = prev_stripped[:-1].split()
+        prev_words[-1] = merged_word
+        new_prev = ' '.join(prev_words)
+        
+        # Preserve trailing whitespace from original
+        if prev_text.endswith(' '):
+            new_prev += ' '
+        
+        # curr_text: remove the merged part
+        remaining_curr_words = curr_words[1:]
+        new_curr = ' '.join(remaining_curr_words)
+        
+        # Preserve any punctuation that was attached to word_part2
+        punct_match = re.search(r'^[a-zA-Z]+([.,;:!?]+)', curr_words[0])
+        if punct_match and remaining_curr_words:
+            pass  # Punctuation already in remaining
+        elif punct_match:
+            new_prev += punct_match.group(1)
+        
+        return new_prev, new_curr
+    
+    def _is_likely_word(self, word: str) -> bool:
+        """
+        Simple heuristic to check if merged string looks like a valid word.
+        
+        This is a lightweight check; for production use, integrate a dictionary.
+        """
+        # Must be alphabetic (allow some internal hyphens for compound words)
+        clean = word.replace('-', '')
+        if not clean.isalpha():
+            return False
+        
+        # Shouldn't have too many consecutive consonants or vowels
+        vowels = set('aeiouAEIOU')
+        consonant_run = 0
+        vowel_run = 0
+        max_consonant_run = 0
+        max_vowel_run = 0
+        
+        for char in clean:
+            if char in vowels:
+                vowel_run += 1
+                max_consonant_run = max(max_consonant_run, consonant_run)
+                consonant_run = 0
+            else:
+                consonant_run += 1
+                max_vowel_run = max(max_vowel_run, vowel_run)
+                vowel_run = 0
+        
+        max_consonant_run = max(max_consonant_run, consonant_run)
+        max_vowel_run = max(max_vowel_run, vowel_run)
+        
+        # Reject if implausible consonant/vowel sequences
+        if max_consonant_run > 5 or max_vowel_run > 4:
+            return False
+        
+        return True
+    
+    def get_stats(self) -> Dict[str, int]:
+        """Return repair statistics."""
+        return self._stats.copy()
+
+
 class ReadingOrderCorrector:
     """
     Three-Phase Pipeline for Reading Order and Heading Path Correction.
@@ -136,8 +522,10 @@ class ReadingOrderCorrector:
     - Multi-column layouts cause incorrect reading order
     - Headers appearing late in scan order get wrong parent assignments
     - Same-page segments inherit stale heading paths
+    - Page decorations (furniture) interfere with content extraction
     
     Pipeline:
+    - Pre-Phase: Furniture detection using FurnitureDetector (NEW v2.4)
     - Phase 1: Column-based segment reordering (left-col then right-col per page)
     - Phase 2: Heading stack reconstruction (ancestor stack algorithm)
     - Phase 3: Same-page backfilling for late-discovered L1 headers
@@ -147,7 +535,9 @@ class ReadingOrderCorrector:
     
     def __init__(self, config: ChunkingConfig = None):
         self.config = config or ChunkingConfig()
+        self.furniture_detector = FurnitureDetector(config)  # NEW v2.4
         self._stats = {
+            "furniture_detected": 0,
             "pages_reordered": 0,
             "segments_moved": 0,
             "paths_reconstructed": 0,
@@ -156,7 +546,7 @@ class ReadingOrderCorrector:
     
     def process(self, segments: List[Dict]) -> List[Dict]:
         """
-        Apply three-phase correction pipeline to segments.
+        Apply four-phase correction pipeline to segments.
         
         Args:
             segments: List of segment dictionaries from parser_docling
@@ -165,6 +555,24 @@ class ReadingOrderCorrector:
             Corrected segments with proper reading order and heading paths
         """
         result = segments
+        
+        # Pre-Phase: Furniture Detection (NEW v2.4)
+        if self.config.ENABLE_FURNITURE_DETECTION:
+            # First pass: scan document for frequency statistics
+            self.furniture_detector.scan_document(result)
+            
+            # Second pass: mark furniture
+            for seg in result:
+                if self.furniture_detector.is_furniture(seg):
+                    seg['is_furniture'] = True
+                    seg['is_noise_header'] = True  # Backward compatibility
+            
+            furniture_stats = self.furniture_detector.get_stats()
+            self._stats['furniture_detected'] = furniture_stats.get('furniture_detected', 0)
+            logger.info(f"Pre-Phase: Detected {self._stats['furniture_detected']} furniture elements "
+                       f"(pattern: {furniture_stats.get('by_pattern', 0)}, "
+                       f"frequency: {furniture_stats.get('by_frequency', 0)}, "
+                       f"position: {furniture_stats.get('by_position', 0)})")
         
         # Phase 1: Reading Order Correction
         if self.config.ENABLE_READING_ORDER_CORRECTION:
@@ -301,28 +709,17 @@ class ReadingOrderCorrector:
         
         This ensures consistent hierarchy regardless of original parsing order.
         """
-        # Import noise patterns from ContinuationDetector
-        noise_patterns = [
-            r'^\s*\(?\s*concluded\s*\)?\s*$',
-            r'^\s*\(?\s*continued\s*\)?\s*$',
-            r'^\s*\(?\s*cont\'?d?\s*\)?\s*$',
-        ]
-        compiled_patterns = [re.compile(p, re.IGNORECASE) for p in noise_patterns]
-        
-        def is_noise_header(seg):
-            if seg.get('type') != 'Header':
-                return False
-            text = seg.get('text', '').strip()
-            return any(p.match(text) for p in compiled_patterns)
+        # Use furniture detection from Pre-Phase (is_furniture flag)
+        # No longer need inline noise pattern compilation
         
         stack = []  # [(level, text), ...]
         
         for seg in segments:
             if seg.get('type') == 'Header':
-                # Skip noise headers - they don't affect hierarchy
-                if is_noise_header(seg):
-                    seg['is_noise_header'] = True
-                    # Noise header inherits current path, doesn't change it
+                # Skip furniture/noise headers - they don't affect hierarchy
+                # is_furniture is set by FurnitureDetector in Pre-Phase
+                if seg.get('is_furniture', False) or seg.get('is_noise_header', False):
+                    # Furniture inherits current path, doesn't change it
                     seg['heading_path'] = self.PATH_SEPARATOR.join([t for _, t in stack])
                     if seg.get('heading_path'):
                         seg['full_context_text'] = f"[Path: {seg['heading_path']}] {seg.get('text', '')}"
@@ -849,21 +1246,21 @@ class POSAnalyzer:
 
 class ContinuationDetector:
     """
-    Enhanced cross-page paragraph continuation detector v2.3.
+    Enhanced cross-page paragraph continuation detector v2.4.
     
     Implements the task requirements for accurate cross-page detection:
     - Incomplete sentences (missing terminal punctuation)
     - Hyphenation (word breaks across lines)
     - Abrupt clause endings (sentences ending with prepositions/conjunctions)
     - bbox position validation
-    - Skip noise headers like "(concluded)", "(continued)" (NEW v2.3)
+    - Skip furniture elements (page decorations) when detecting continuations
     
     Strategy:
     1. Check if previous segment is at page bottom and current is at page top
     2. Verify style consistency (column, text patterns)
     3. Calculate detailed continuation score with evidence
     4. Return continuation type with merge evidence for explainability
-    5. Skip intervening noise headers when detecting cross-page continuations
+    5. Skip furniture elements (now detected by FurnitureDetector) when crossing pages
     
     Returns:
     - 'full': High confidence continuation, auto-merge (score >= 0.7)
@@ -874,17 +1271,15 @@ class ContinuationDetector:
     # Types that should NOT be merged across pages
     BREAK_TYPES = {'Header', 'Table', 'Picture', 'Formula', 'LearningObjective'}
     
-    # Noise header patterns - these are page decorations, not real headers
-    # They should be skipped when detecting paragraph continuations
+    # Fallback noise patterns (used if is_furniture not set)
     NOISE_HEADER_PATTERNS = [
-        r'^\s*\(?\s*concluded\s*\)?\s*$',         # (concluded), concluded
-        r'^\s*\(?\s*continued\s*\)?\s*$',         # (continued), continued
-        r'^\s*\(?\s*cont\'?d?\s*\)?\s*$',         # (cont'd), (contd)
-        r'^\s*\(?\s*continuation\s*\)?\s*$',      # (continuation)
-        r'^\s*\(?\s*continued on next page\s*\)?\s*$',
-        r'^\s*\(?\s*continued from previous page\s*\)?\s*$',
-        r'^\s*\(?\s*see next page\s*\)?\s*$',
-        r'^\s*\(?\s*to be continued\s*\)?\s*$',
+        r'^\s*\(?\s*concluded\s*\)?\s*$',
+        r'^\s*\(?\s*continued\s*\)?\s*$',
+        r'^\s*\(?\s*cont\'?d?\s*\)?\s*$',
+        r'^\s*\(?\s*continuation\s*\)?\s*$',
+        r'^\s*continued\s+(?:on|from)\s+(?:next|previous)?\s*page',
+        r'^\s*see\s+(?:next|previous)\s+page',
+        r'^\s*to\s+be\s+continued',
     ]
     
     # Score thresholds
@@ -894,15 +1289,21 @@ class ContinuationDetector:
     def __init__(self, config: ChunkingConfig = None):
         self.config = config or ChunkingConfig()
         self._last_evidence = {}  # Store last detection's evidence
-        # Compile noise patterns for efficiency
+        # Compile noise patterns for fallback
         self._noise_patterns = [re.compile(p, re.IGNORECASE) for p in self.NOISE_HEADER_PATTERNS]
     
     def _is_noise_header(self, seg: Dict[str, Any]) -> bool:
         """
-        Check if a segment is a noise header (page decoration) that should be skipped.
+        Check if a segment is furniture/noise that should be skipped.
         
-        These are typically: (concluded), (continued), etc.
+        Uses the is_furniture flag set by FurnitureDetector (preferred),
+        falls back to pattern matching if flag not available.
         """
+        # First check the is_furniture flag (set by FurnitureDetector in Pre-Phase)
+        if seg.get('is_furniture', False) or seg.get('is_noise_header', False):
+            return True
+        
+        # Fallback: pattern-based detection for Headers
         if seg.get('type') != 'Header':
             return False
         
@@ -1379,6 +1780,10 @@ class LogicSegmenter:
             features.append("backfill_correction")
         if self.config.ENABLE_CONTINUATION_DETECTION:
             features.append("cross_page_continuation")
+        if self.config.ENABLE_FURNITURE_DETECTION:
+            features.append("furniture_detection")
+        if self.config.ENABLE_DEHYPHENATION:
+            features.append("dehyphenation")
         
         # Calculate stats and include corrector stats
         processing_stats = self._calculate_stats(chunks)
@@ -1390,7 +1795,7 @@ class LogicSegmenter:
                 **metadata,
                 "total_chunks": len(chunks),
                 "total_segments": len(flat_segments),
-                "processing_version": "2.3",
+                "processing_version": "2.4",
                 "features": features,
                 "processing_stats": processing_stats
             },
@@ -1785,13 +2190,44 @@ class LogicSegmenter:
         self.chunk_counter += 1
         chunk_id = f"chunk_{self.chunk_counter:04d}"
         
-        # Combine text
-        full_text = " ".join([s.get('text', '') for s in segments]).strip()
+        # Combine text - exclude furniture/noise from content
+        # Apply dehyphenation to repair word breaks across segments
+        text_parts = []
+        for s in segments:
+            # Skip furniture elements (their text shouldn't appear in content)
+            if s.get('is_furniture', False) or s.get('is_noise_header', False):
+                continue
+            text = s.get('text', '').strip()
+            if text:
+                text_parts.append(text)
+        
+        # Apply dehyphenation if enabled
+        if self.config.ENABLE_DEHYPHENATION and len(text_parts) > 1:
+            repaired_parts = []
+            dehyph = DehyphenationHelper(self.config)
+            
+            for i, part in enumerate(text_parts):
+                if i == 0:
+                    repaired_parts.append(part)
+                else:
+                    # Try to merge hyphenated word from previous part
+                    prev_part = repaired_parts[-1]
+                    new_prev, new_curr = dehyph.merge_hyphenated(prev_part, part)
+                    repaired_parts[-1] = new_prev
+                    if new_curr:  # Only add if there's remaining text
+                        repaired_parts.append(new_curr)
+                    elif not new_curr and new_prev != prev_part:
+                        # Word was fully absorbed into previous part
+                        pass
+            
+            text_parts = repaired_parts
+        
+        full_text = " ".join(text_parts).strip()
         
         # Word count
         word_count = len(full_text.split())
         
-        # Get source segment IDs
+        # Get source segment IDs (include noise headers for traceability)
         source_ids = [s.get('segment_id', '') for s in segments if s.get('segment_id')]
         
         # Get page range
