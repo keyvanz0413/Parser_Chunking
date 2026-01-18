@@ -1,12 +1,20 @@
 """
-Logic Segmenter Module v2.0 (Upgraded)
+Logic Segmenter Module v2.3 (Three-Phase Pipeline)
 
 Processes flat_segments from parser_docling.py and applies:
-1. POS Tagging (via spaCy) - Sentence role identification with Imperative detection
-2. Rule-Based Grouping - List aggregation, definition detection, etc.
-3. Tag Enrichment - 20+ semantic tags from taxonomy (enhanced with Theorem/Lemma/Proof)
-4. Context Overlap - Each chunk carries context from previous chunk for RAG continuity
-5. Token-based Length Control - Prevents extreme chunk sizes
+1. Reading Order Correction (NEW v2.3) - Column-aware segment reordering for multi-column layouts
+2. Heading Path Reconstruction (NEW v2.3) - Stack-based hierarchy rebuilding with backfilling
+3. POS Tagging (via spaCy) - Sentence role identification with Imperative detection
+4. Rule-Based Grouping - List aggregation, definition detection, etc.
+5. Tag Enrichment - 20+ semantic tags from taxonomy (enhanced with Theorem/Lemma/Proof)
+6. Context Overlap - Each chunk carries context from previous chunk for RAG continuity
+7. Token-based Length Control - Prevents extreme chunk sizes
+8. Cross-Page Continuation Detection - Hyphenation, open clause, fragment detection
+
+Three-Phase Pipeline Architecture:
+- Phase 1: Column-based reading order correction (left-col then right-col)
+- Phase 2: Heading stack reconstruction (ancestor stack algorithm)
+- Phase 3: Same-page backfilling for late-discovered L1 headers
 
 Input: JSON output from parser_docling.py
 Output: Enriched chunks with roles, tags, context overlap, and metadata
@@ -45,6 +53,21 @@ class ChunkingConfig:
     
     # Short paragraph merge threshold
     SHORT_PARAGRAPH_WORDS = 50    # Paragraphs shorter than this may be merged
+    
+    # Cross-page continuation settings
+    ENABLE_CONTINUATION_DETECTION = True  # Enable cross-page continuation
+    CONTINUATION_STYLE_THRESHOLD = 0.6    # Minimum style similarity score for continuation
+    CONTINUATION_COLUMN_STRICT = True     # Require same column for continuation
+    
+    # Three-Phase Pipeline settings (NEW v2.3)
+    ENABLE_READING_ORDER_CORRECTION = True   # Phase 1: Column-based reordering
+    ENABLE_HEADING_RECONSTRUCTION = True     # Phase 2: Stack-based hierarchy rebuild
+    ENABLE_BACKFILL_CORRECTION = True        # Phase 3: Same-page L1 backfilling
+    
+    # Column detection thresholds
+    COLUMN_DETECTION_THRESHOLD = 0.45        # x < page_width * threshold => left column
+    PAGE_WIDTH_DEFAULT = 612.0               # Default PDF page width (8.5" × 72dpi)
+
 
 
 # =============================================================================
@@ -63,7 +86,7 @@ class SentenceRole:
 @dataclass
 class EnrichedChunk:
     """
-    Core Schema v2.0 - The standardized output format with overlap support.
+    Core Schema v2.1 - The standardized output format with overlap and continuation support.
     
     Fields:
     - chunk_id: Unique identifier
@@ -76,19 +99,322 @@ class EnrichedChunk:
     - source_segments: Original segment IDs for traceability
     - page_range: Page numbers covered by this chunk
     - word_count: Approximate word count for length analysis
+    
+    NEW (v2.1) - Cross-page continuation:
+    - is_cross_page: True if chunk spans multiple pages
+    - continuation_type: 'none', 'full' (confident), 'partial' (needs review)
+    - needs_review: True if continuation detection was uncertain
+    - merge_evidence: Dict with reasons for merge decision (explainability)
     """
     chunk_id: str
     heading_path: str
     chunk_type: str
     content: str
-    context_prefix: str = ""  # NEW: Overlap from previous chunk
+    context_prefix: str = ""  # Overlap from previous chunk
     sentences: List[Dict[str, Any]] = field(default_factory=list)
     tags: List[str] = field(default_factory=list)
     source_segments: List[str] = field(default_factory=list)
     page_range: List[int] = field(default_factory=list)
     depth: int = 0
-    word_count: int = 0  # NEW: For length analysis
+    word_count: int = 0
+    # NEW v2.1: Cross-page continuation fields
+    is_cross_page: bool = False
+    continuation_type: str = "none"  # none, full, partial
+    needs_review: bool = False
+    merge_evidence: Dict[str, Any] = field(default_factory=dict)  # Explainability
     
+
+# =============================================================================
+# Three-Phase Pipeline Processor (NEW v2.3)
+# =============================================================================
+
+class ReadingOrderCorrector:
+    """
+    Three-Phase Pipeline for Reading Order and Heading Path Correction.
+    
+    Addresses the common PDF parsing issue where:
+    - Multi-column layouts cause incorrect reading order
+    - Headers appearing late in scan order get wrong parent assignments
+    - Same-page segments inherit stale heading paths
+    
+    Pipeline:
+    - Phase 1: Column-based segment reordering (left-col then right-col per page)
+    - Phase 2: Heading stack reconstruction (ancestor stack algorithm)
+    - Phase 3: Same-page backfilling for late-discovered L1 headers
+    """
+    
+    PATH_SEPARATOR = " > "
+    
+    def __init__(self, config: ChunkingConfig = None):
+        self.config = config or ChunkingConfig()
+        self._stats = {
+            "pages_reordered": 0,
+            "segments_moved": 0,
+            "paths_reconstructed": 0,
+            "backfill_corrections": 0
+        }
+    
+    def process(self, segments: List[Dict]) -> List[Dict]:
+        """
+        Apply three-phase correction pipeline to segments.
+        
+        Args:
+            segments: List of segment dictionaries from parser_docling
+            
+        Returns:
+            Corrected segments with proper reading order and heading paths
+        """
+        result = segments
+        
+        # Phase 1: Reading Order Correction
+        if self.config.ENABLE_READING_ORDER_CORRECTION:
+            result = self._phase1_reorder_by_columns(result)
+            logger.info(f"Phase 1: Reordered {self._stats['segments_moved']} segments across {self._stats['pages_reordered']} pages")
+        
+        # Phase 2: Heading Stack Reconstruction
+        if self.config.ENABLE_HEADING_RECONSTRUCTION:
+            result = self._phase2_rebuild_heading_paths(result)
+            logger.info(f"Phase 2: Reconstructed {self._stats['paths_reconstructed']} heading paths")
+        
+        # Phase 3: Same-page Backfilling
+        if self.config.ENABLE_BACKFILL_CORRECTION:
+            result = self._phase3_backfill_same_page(result)
+            logger.info(f"Phase 3: Applied {self._stats['backfill_corrections']} backfill corrections")
+        
+        return result
+    
+    def get_stats(self) -> Dict[str, int]:
+        """Return processing statistics."""
+        return self._stats.copy()
+    
+    # =========================================================================
+    # Phase 1: Column-Based Reading Order Correction
+    # =========================================================================
+    
+    def _phase1_reorder_by_columns(self, segments: List[Dict]) -> List[Dict]:
+        """
+        Reorder segments within each page by column (left first, then right).
+        
+        This fixes the common issue where a two-column page gets scanned
+        left-to-right across both columns, causing interleaved text.
+        
+        Algorithm:
+        1. Group segments by page
+        2. For each page, determine if it's multi-column (based on x-positions)
+        3. Split into left/right columns based on x-coordinate
+        4. Sort each column by y-coordinate (top to bottom)
+        5. Merge columns: process by y-position, alternating between left and right as needed
+        """
+        from collections import defaultdict
+        
+        # Group by page
+        pages = defaultdict(list)
+        for seg in segments:
+            pages[seg.get('page', 1)].append(seg)
+        
+        result = []
+        threshold = self.config.COLUMN_DETECTION_THRESHOLD
+        page_width = self.config.PAGE_WIDTH_DEFAULT
+        
+        for page_num in sorted(pages.keys()):
+            page_segs = pages[page_num]
+            
+            # Detect page width from bbox if available
+            max_x = max((s.get('bbox', [0, 0, 0, 0])[2] for s in page_segs if s.get('bbox')), default=page_width)
+            if max_x > 100:  # Reasonable page width
+                page_width = max_x * 1.1  # Add margin
+            
+            mid_x = page_width * threshold
+            
+            # Separate into columns
+            left_col = []
+            right_col = []
+            spanning = []
+            
+            for seg in page_segs:
+                bbox = seg.get('bbox')
+                if not bbox or len(bbox) < 4:
+                    spanning.append(seg)
+                    continue
+                
+                x_left, y_top, x_right, y_bottom = bbox[0], bbox[1], bbox[2], bbox[3]
+                seg_width = x_right - x_left
+                
+                # Check if segment spans both columns (wide element)
+                if x_left < mid_x and x_right > page_width * 0.55:
+                    spanning.append(seg)
+                elif x_left < mid_x:
+                    left_col.append(seg)
+                else:
+                    right_col.append(seg)
+            
+            # Sort each group by y-coordinate (PDF y: higher = top of page)
+            # Sort descending so top-of-page comes first
+            left_col.sort(key=lambda s: -s.get('bbox', [0, 0, 0, 0])[1])
+            right_col.sort(key=lambda s: -s.get('bbox', [0, 0, 0, 0])[1])
+            spanning.sort(key=lambda s: -s.get('bbox', [0, 0, 0, 0])[1])
+            
+            # NEW v2.3: Improved merge strategy for textbook layouts
+            # Instead of "spanning + left + right", we merge by y-position
+            # This ensures continuation paragraphs stay in correct reading order
+            
+            # Combine all segments and sort by y (top to bottom)
+            all_segs = []
+            for seg in left_col + right_col + spanning:
+                y_top = seg.get('bbox', [0, 0, 0, 0])[1]
+                col_idx = seg.get('column_index', -1)
+                # For same y-level, left column comes before right
+                sort_key = (-y_top, 0 if col_idx <= 0 else 1)
+                all_segs.append((sort_key, seg))
+            
+            all_segs.sort(key=lambda x: x[0])
+            reordered = [seg for _, seg in all_segs]
+            
+            # Check if reordering actually changed anything
+            original_ids = [s.get('segment_id') for s in page_segs]
+            new_ids = [s.get('segment_id') for s in reordered]
+            
+            if original_ids != new_ids:
+                self._stats['pages_reordered'] += 1
+                self._stats['segments_moved'] += sum(1 for i, seg_id in enumerate(new_ids) if i < len(original_ids) and original_ids[i] != seg_id)
+            
+            result.extend(reordered)
+        
+        return result
+    
+    # =========================================================================
+    # Phase 2: Heading Stack Reconstruction (Ancestor Stack Algorithm)
+    # =========================================================================
+    
+    def _phase2_rebuild_heading_paths(self, segments: List[Dict]) -> List[Dict]:
+        """
+        Rebuild heading_path for all segments using the ancestor stack algorithm.
+        
+        Algorithm:
+        1. Maintain a stack of (level, text) tuples representing current heading hierarchy
+        2. For each Header segment:
+           - Pop all entries with level >= current level
+           - Push current header onto stack
+        3. For each non-Header segment:
+           - Inherit the current stack's path
+        
+        This ensures consistent hierarchy regardless of original parsing order.
+        """
+        stack = []  # [(level, text), ...]
+        
+        for seg in segments:
+            if seg.get('type') == 'Header':
+                level = seg.get('level', 1)
+                text = seg.get('text', '').strip()
+                
+                # Pop all headers at same or deeper level
+                while stack and stack[-1][0] >= level:
+                    stack.pop()
+                
+                # Push current header
+                if text:
+                    stack.append((level, text))
+                
+                # Update segment's heading_path
+                old_path = seg.get('heading_path', '')
+                new_path = self.PATH_SEPARATOR.join([t for _, t in stack])
+                
+                if old_path != new_path:
+                    self._stats['paths_reconstructed'] += 1
+                    seg['heading_path'] = new_path
+                    seg['heading_path_original'] = old_path  # Keep original for debugging
+            else:
+                # Non-header: inherit current stack's path
+                old_path = seg.get('heading_path', '')
+                new_path = self.PATH_SEPARATOR.join([t for _, t in stack])
+                
+                if old_path != new_path:
+                    self._stats['paths_reconstructed'] += 1
+                    seg['heading_path'] = new_path
+                    seg['heading_path_original'] = old_path
+            
+            # Update full_context_text
+            if seg.get('heading_path'):
+                seg['full_context_text'] = f"[Path: {seg['heading_path']}] {seg.get('text', '')}"
+        
+        return segments
+    
+    # =========================================================================
+    # Phase 3: Same-Page Backfilling for Late-Discovered Headers
+    # =========================================================================
+    
+    def _phase3_backfill_same_page(self, segments: List[Dict]) -> List[Dict]:
+        """
+        Correct heading paths for segments that appear before a major header on the same page.
+        
+        Scenario:
+        - Page 30 has "The Investment Environment" (title) on the left at y=656
+        - Page 30 has "CHAPTER 1" (L1 header) on the right at y=682
+        - Due to column sorting, left content is processed first
+        - The left content gets the wrong (stale) heading path
+        
+        Solution:
+        - For each page, find the highest-level (lowest number) Header
+        - If that header is not the first element on the page, backfill earlier segments
+        """
+        from collections import defaultdict
+        
+        # Group by page
+        pages = defaultdict(list)
+        for i, seg in enumerate(segments):
+            pages[seg.get('page', 1)].append((i, seg))
+        
+        for page_num, page_items in pages.items():
+            if len(page_items) < 2:
+                continue
+            
+            # Find all headers on this page
+            headers = [(i, seg) for i, seg in page_items if seg.get('type') == 'Header']
+            if not headers:
+                continue
+            
+            # Find the highest-priority header (lowest level number)
+            top_header_idx, top_header = min(headers, key=lambda x: x[1].get('level', 99))
+            top_level = top_header.get('level', 99)
+            
+            # Only backfill for L1 headers that aren't at the start
+            if top_level > 1:
+                continue
+            
+            # Find position of this header in page_items
+            page_position = next((pos for pos, (i, s) in enumerate(page_items) if i == top_header_idx), None)
+            if page_position is None or page_position == 0:
+                continue
+            
+            # Backfill: update all segments before this header on the same page
+            new_path_prefix = top_header.get('text', '').strip()
+            if not new_path_prefix:
+                continue
+            
+            for pos in range(page_position):
+                global_idx, seg = page_items[pos]
+                old_path = seg.get('heading_path', '')
+                
+                # Construct new path
+                if old_path:
+                    # Replace old root with new root
+                    path_parts = old_path.split(self.PATH_SEPARATOR)
+                    if path_parts[0] != new_path_prefix:
+                        new_path = self.PATH_SEPARATOR.join([new_path_prefix] + path_parts[1:]) if len(path_parts) > 1 else new_path_prefix
+                        seg['heading_path'] = new_path
+                        seg['heading_path_backfilled'] = True
+                        seg['heading_path_original'] = old_path
+                        self._stats['backfill_corrections'] += 1
+                else:
+                    seg['heading_path'] = new_path_prefix
+                    seg['heading_path_backfilled'] = True
+                    self._stats['backfill_corrections'] += 1
+                
+                # Update full_context_text
+                seg['full_context_text'] = f"[Path: {seg.get('heading_path', '')}] {seg.get('text', '')}"
+        
+        return segments
+
 
 # =============================================================================
 # Tag Rules (20+ Tags - Enhanced with Theorem/Lemma/Proof)
@@ -494,6 +820,457 @@ class POSAnalyzer:
 
 
 # =============================================================================
+# Cross-Page Continuation Detector (Enhanced v2.2)
+# =============================================================================
+
+class ContinuationDetector:
+    """
+    Enhanced cross-page paragraph continuation detector v2.3.
+    
+    Implements the task requirements for accurate cross-page detection:
+    - Incomplete sentences (missing terminal punctuation)
+    - Hyphenation (word breaks across lines)
+    - Abrupt clause endings (sentences ending with prepositions/conjunctions)
+    - bbox position validation
+    - Skip noise headers like "(concluded)", "(continued)" (NEW v2.3)
+    
+    Strategy:
+    1. Check if previous segment is at page bottom and current is at page top
+    2. Verify style consistency (column, text patterns)
+    3. Calculate detailed continuation score with evidence
+    4. Return continuation type with merge evidence for explainability
+    5. Skip intervening noise headers when detecting cross-page continuations
+    
+    Returns:
+    - 'full': High confidence continuation, auto-merge (score >= 0.7)
+    - 'partial': Uncertain, needs human review (score 0.4-0.7)
+    - 'none': Not a continuation (score < 0.4)
+    """
+    
+    # Types that should NOT be merged across pages
+    BREAK_TYPES = {'Header', 'Table', 'Picture', 'Formula', 'LearningObjective'}
+    
+    # Noise header patterns - these are page decorations, not real headers
+    # They should be skipped when detecting paragraph continuations
+    NOISE_HEADER_PATTERNS = [
+        r'^\s*\(?\s*concluded\s*\)?\s*$',         # (concluded), concluded
+        r'^\s*\(?\s*continued\s*\)?\s*$',         # (continued), continued
+        r'^\s*\(?\s*cont\'?d?\s*\)?\s*$',         # (cont'd), (contd)
+        r'^\s*\(?\s*continuation\s*\)?\s*$',      # (continuation)
+        r'^\s*\(?\s*continued on next page\s*\)?\s*$',
+        r'^\s*\(?\s*continued from previous page\s*\)?\s*$',
+        r'^\s*\(?\s*see next page\s*\)?\s*$',
+        r'^\s*\(?\s*to be continued\s*\)?\s*$',
+    ]
+    
+    # Score thresholds
+    FULL_THRESHOLD = 0.7
+    PARTIAL_THRESHOLD = 0.4
+    
+    def __init__(self, config: ChunkingConfig = None):
+        self.config = config or ChunkingConfig()
+        self._last_evidence = {}  # Store last detection's evidence
+        # Compile noise patterns for efficiency
+        self._noise_patterns = [re.compile(p, re.IGNORECASE) for p in self.NOISE_HEADER_PATTERNS]
+    
+    def _is_noise_header(self, seg: Dict[str, Any]) -> bool:
+        """
+        Check if a segment is a noise header (page decoration) that should be skipped.
+        
+        These are typically: (concluded), (continued), etc.
+        """
+        if seg.get('type') != 'Header':
+            return False
+        
+        text = seg.get('text', '').strip()
+        if not text:
+            return False
+        
+        for pattern in self._noise_patterns:
+            if pattern.match(text):
+                return True
+        
+        return False
+    
+    def detect_continuation(self, prev_seg: Dict[str, Any], curr_seg: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+        """
+        Detect if curr_seg is a continuation of prev_seg.
+        
+        Returns:
+            Tuple of (continuation_type, evidence_dict)
+            - continuation_type: 'full', 'partial', or 'none'
+            - evidence_dict: Detailed reasons for the decision
+        """
+        evidence = {
+            "prev_segment_id": prev_seg.get('segment_id', ''),
+            "curr_segment_id": curr_seg.get('segment_id', ''),
+            "rules_triggered": [],
+            "rules_failed": [],
+            "score_breakdown": {},
+            "final_score": 0.0,
+            "decision": "none",
+        }
+        
+        if not self.config.ENABLE_CONTINUATION_DETECTION:
+            evidence["rules_failed"].append("continuation_detection_disabled")
+            self._last_evidence = evidence
+            return 'none', evidence
+        
+        prev_page = prev_seg.get('page', 0)
+        curr_page = curr_seg.get('page', 0)
+        prev_type = prev_seg.get('type', 'Paragraph')
+        curr_type = curr_seg.get('type', 'Paragraph')
+        
+        # =====================================================================
+        # Rule 1: Break types never continue
+        # =====================================================================
+        if curr_type in self.BREAK_TYPES or prev_type in self.BREAK_TYPES:
+            evidence["rules_failed"].append(f"break_type: prev={prev_type}, curr={curr_type}")
+            self._last_evidence = evidence
+            return 'none', evidence
+        
+        # =====================================================================
+        # Rule 2: Must be on different pages (cross-page only)
+        # =====================================================================
+        if curr_page == prev_page:
+            evidence["rules_failed"].append(f"same_page: {curr_page}")
+            self._last_evidence = evidence
+            return 'none', evidence
+        
+        # =====================================================================
+        # Rule 3: Must be consecutive pages
+        # =====================================================================
+        if curr_page != prev_page + 1:
+            evidence["rules_failed"].append(f"non_consecutive: prev={prev_page}, curr={curr_page}")
+            self._last_evidence = evidence
+            return 'none', evidence
+        
+        evidence["rules_triggered"].append("consecutive_pages")
+        
+        # =====================================================================
+        # Rule 4: Check page position (bottom -> top)
+        # =====================================================================
+        prev_at_bottom = prev_seg.get('at_page_bottom', False)
+        curr_at_top = curr_seg.get('at_page_top', False)
+        
+        # If position info is missing, estimate from bbox
+        if 'at_page_bottom' not in prev_seg:
+            prev_at_bottom = self._estimate_at_bottom(prev_seg)
+        if 'at_page_top' not in curr_seg:
+            curr_at_top = self._estimate_at_top(curr_seg)
+        
+        if not prev_at_bottom:
+            evidence["rules_failed"].append("prev_not_at_bottom")
+        else:
+            evidence["rules_triggered"].append("prev_at_page_bottom")
+            
+        if not curr_at_top:
+            evidence["rules_failed"].append("curr_not_at_top")
+        else:
+            evidence["rules_triggered"].append("curr_at_page_top")
+        
+        # Position check is a soft requirement - low score if fails
+        position_valid = prev_at_bottom and curr_at_top
+        
+        # =====================================================================
+        # Rule 5: Check column consistency
+        # =====================================================================
+        prev_col = prev_seg.get('column_index', 0)
+        curr_col = curr_seg.get('column_index', 0)
+        
+        column_consistent = True
+        if self.config.CONTINUATION_COLUMN_STRICT:
+            # Spanning items (-1) always consistent
+            if prev_col >= 0 and curr_col >= 0 and prev_col != curr_col:
+                column_consistent = False
+                evidence["rules_failed"].append(f"column_mismatch: prev={prev_col}, curr={curr_col}")
+            else:
+                evidence["rules_triggered"].append("column_consistent")
+        
+        # =====================================================================
+        # Calculate comprehensive style score with breakdown
+        # =====================================================================
+        score, score_breakdown = self._calculate_enhanced_style_score(
+            prev_seg, curr_seg, position_valid, column_consistent
+        )
+        
+        evidence["score_breakdown"] = score_breakdown
+        evidence["final_score"] = round(score, 3)
+        
+        # =====================================================================
+        # Make decision based on score
+        # =====================================================================
+        if score >= self.FULL_THRESHOLD:
+            decision = 'full'
+            evidence["decision"] = "full (high confidence merge)"
+        elif score >= self.PARTIAL_THRESHOLD:
+            decision = 'partial'
+            evidence["decision"] = "partial (needs review)"
+        else:
+            decision = 'none'
+            evidence["decision"] = "none (score too low)"
+        
+        self._last_evidence = evidence
+        
+        if decision != 'none':
+            logger.debug(f"Cross-page continuation: {prev_seg.get('segment_id')} -> "
+                        f"{curr_seg.get('segment_id')} = {decision} (score: {score:.2f})")
+        
+        return decision, evidence
+    
+    def _calculate_enhanced_style_score(self, prev_seg: Dict[str, Any], curr_seg: Dict[str, Any],
+                                        position_valid: bool, column_consistent: bool) -> Tuple[float, Dict]:
+        """
+        Calculate comprehensive continuation score with detailed breakdown.
+        
+        Enhanced scoring using task requirements:
+        - Hyphenation detection (high weight)
+        - Open clause endings (high weight)
+        - Sentence completeness
+        - Start pattern analysis
+        """
+        breakdown = {}
+        total_score = 0.0
+        
+        prev_hints = prev_seg.get('style_hints', {})
+        curr_hints = curr_seg.get('style_hints', {})
+        
+        # =====================================================================
+        # Factor 1: Position validity (weight: 0.15)
+        # =====================================================================
+        weight = 0.15
+        if position_valid:
+            total_score += weight
+            breakdown["position_valid"] = {"score": weight, "max": weight, "detail": "bottom->top verified"}
+        else:
+            breakdown["position_valid"] = {"score": 0, "max": weight, "detail": "position check failed"}
+        
+        # =====================================================================
+        # Factor 2: Column consistency (weight: 0.10)
+        # =====================================================================
+        weight = 0.10
+        if column_consistent:
+            total_score += weight
+            breakdown["column_consistent"] = {"score": weight, "max": weight, "detail": "same column"}
+        else:
+            breakdown["column_consistent"] = {"score": 0, "max": weight, "detail": "column mismatch"}
+        
+        # =====================================================================
+        # Factor 3: Hyphenation - STRONG INDICATOR (weight: 0.20)
+        # =====================================================================
+        weight = 0.20
+        if prev_hints.get('ends_with_hyphen', False):
+            total_score += weight
+            breakdown["hyphenation"] = {"score": weight, "max": weight, "detail": "word break at line end"}
+        else:
+            breakdown["hyphenation"] = {"score": 0, "max": weight, "detail": "no hyphenation"}
+        
+        # =====================================================================
+        # Factor 4: Open clause ending - STRONG INDICATOR (weight: 0.15)
+        # =====================================================================
+        weight = 0.15
+        if prev_hints.get('ends_with_open_clause', False):
+            total_score += weight
+            # Extract last word for evidence
+            prev_text = prev_seg.get('text', '')
+            last_word = prev_text.split()[-1] if prev_text.split() else ''
+            breakdown["open_clause"] = {"score": weight, "max": weight, 
+                                        "detail": f"ends with '{last_word}'"}
+        else:
+            breakdown["open_clause"] = {"score": 0, "max": weight, "detail": "complete clause"}
+        
+        # =====================================================================
+        # Factor 5: Fragment pattern (weight: 0.10)
+        # =====================================================================
+        weight = 0.10
+        if prev_hints.get('has_fragment_pattern', False):
+            total_score += weight
+            breakdown["fragment_pattern"] = {"score": weight, "max": weight, 
+                                             "detail": "comma/ellipsis/equation ending"}
+        else:
+            breakdown["fragment_pattern"] = {"score": 0, "max": weight, "detail": "no fragment pattern"}
+        
+        # =====================================================================
+        # Factor 6: Continuation start pattern (weight: 0.15)
+        # =====================================================================
+        weight = 0.15
+        if curr_hints.get('starts_like_continuation', False):
+            total_score += weight
+            curr_text = curr_seg.get('text', '')
+            first_word = curr_text.split()[0] if curr_text.split() else ''
+            breakdown["continuation_start"] = {"score": weight, "max": weight,
+                                               "detail": f"starts with '{first_word}'"}
+        elif curr_hints.get('starts_lowercase', False):
+            # Partial credit for lowercase start
+            partial = weight * 0.7
+            total_score += partial
+            breakdown["continuation_start"] = {"score": partial, "max": weight,
+                                               "detail": "starts lowercase"}
+        else:
+            breakdown["continuation_start"] = {"score": 0, "max": weight, "detail": "normal start"}
+        
+        # =====================================================================
+        # Factor 7: Same heading path (weight: 0.05)
+        # =====================================================================
+        weight = 0.05
+        if prev_seg.get('heading_path') == curr_seg.get('heading_path'):
+            total_score += weight
+            breakdown["same_heading"] = {"score": weight, "max": weight, "detail": "same section"}
+        else:
+            breakdown["same_heading"] = {"score": 0, "max": weight, "detail": "different sections"}
+        
+        # =====================================================================
+        # Factor 8: Same segment type (weight: 0.05)
+        # =====================================================================
+        weight = 0.05
+        if prev_seg.get('type') == curr_seg.get('type'):
+            total_score += weight
+            breakdown["same_type"] = {"score": weight, "max": weight, 
+                                      "detail": prev_seg.get('type', 'unknown')}
+        else:
+            breakdown["same_type"] = {"score": 0, "max": weight, 
+                                      "detail": f"{prev_seg.get('type')} -> {curr_seg.get('type')}"}
+        
+        # =====================================================================
+        # Factor 9: Incomplete sentence (weight: 0.05)
+        # =====================================================================
+        weight = 0.05
+        if prev_hints.get('ends_incomplete', False) and not prev_hints.get('has_terminal_punctuation', True):
+            total_score += weight
+            breakdown["incomplete_sentence"] = {"score": weight, "max": weight, 
+                                                "detail": "no terminal punctuation"}
+        else:
+            breakdown["incomplete_sentence"] = {"score": 0, "max": weight, 
+                                                "detail": "complete sentence"}
+        
+        # =====================================================================
+        # Factor 10: STRONG COMBINATION - Incomplete + Lowercase start (NEW v2.3)
+        # This is the strongest cross-page continuation signal
+        # When prev ends without punctuation AND curr starts lowercase, it's almost
+        # certainly a continuation, even if position/column checks fail
+        # =====================================================================
+        weight = 0.20  # High weight for this strong signal
+        prev_incomplete = prev_hints.get('ends_incomplete', False) and not prev_hints.get('has_terminal_punctuation', True)
+        curr_lowercase = curr_hints.get('starts_lowercase', False)
+        
+        if prev_incomplete and curr_lowercase:
+            total_score += weight
+            breakdown["strong_continuation_signal"] = {
+                "score": weight, "max": weight, 
+                "detail": "incomplete sentence + lowercase start (strong signal)"
+            }
+        else:
+            breakdown["strong_continuation_signal"] = {
+                "score": 0, "max": weight, 
+                "detail": "no strong continuation pattern"
+            }
+        
+        # Calculate summary
+        breakdown["total"] = round(total_score, 3)
+        breakdown["max_possible"] = 1.0
+        
+        return total_score, breakdown
+    
+    def _estimate_at_bottom(self, seg: Dict[str, Any]) -> bool:
+        """Estimate if segment is at page bottom based on bbox."""
+        bbox = seg.get('bbox')
+        if not bbox or len(bbox) < 4:
+            return False
+        # Assume page height ~842 (A4), bottom 15%
+        return bbox[3] > 842 * 0.85
+    
+    def _estimate_at_top(self, seg: Dict[str, Any]) -> bool:
+        """Estimate if segment is at page top based on bbox."""
+        bbox = seg.get('bbox')
+        if not bbox or len(bbox) < 4:
+            return False
+        # Assume page height ~842 (A4), top 15%
+        return bbox[1] < 842 * 0.15
+    
+    def get_last_evidence(self) -> Dict[str, Any]:
+        """Return the evidence from the last detection call."""
+        return self._last_evidence
+    
+    def _find_previous_content_segment(self, segments: List[Dict], current_index: int) -> Tuple[Optional[Dict], List[Dict]]:
+        """
+        Find the previous content segment, skipping noise headers.
+        
+        Returns:
+            Tuple of (previous_content_segment, list_of_skipped_noise_segments)
+            Returns (None, []) if no valid previous segment found.
+        """
+        skipped = []
+        for j in range(current_index - 1, -1, -1):
+            seg = segments[j]
+            if self._is_noise_header(seg):
+                skipped.append(seg)
+                continue
+            # Found a non-noise segment
+            return seg, skipped
+        return None, skipped
+    
+    def annotate_segments(self, segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Annotate all segments with continuation markers and evidence.
+        
+        Enhanced v2.3: Skips noise headers (like "(concluded)") when detecting
+        cross-page continuations. This allows paragraphs to be correctly merged
+        even when page decoration elements appear between them.
+        
+        Adds to each segment:
+        - 'is_continuation': 'full', 'partial', or 'none'
+        - 'continuation_evidence': Dict with detailed reasons
+        - 'skipped_noise_headers': List of noise headers that were skipped (if any)
+        """
+        if len(segments) < 2:
+            for seg in segments:
+                seg['is_continuation'] = 'none'
+                seg['continuation_evidence'] = {}
+            return segments
+        
+        # First segment is never a continuation
+        segments[0]['is_continuation'] = 'none'
+        segments[0]['continuation_evidence'] = {}
+        
+        for i in range(1, len(segments)):
+            curr_seg = segments[i]
+            
+            # Skip if current segment is a noise header
+            if self._is_noise_header(curr_seg):
+                curr_seg['is_continuation'] = 'none'
+                curr_seg['continuation_evidence'] = {"skipped": "noise_header"}
+                curr_seg['is_noise_header'] = True
+                continue
+            
+            # Find previous content segment, skipping noise headers
+            prev_seg, skipped_noise = self._find_previous_content_segment(segments, i)
+            
+            if prev_seg is None:
+                curr_seg['is_continuation'] = 'none'
+                curr_seg['continuation_evidence'] = {}
+                continue
+            
+            # Detect continuation
+            continuation, evidence = self.detect_continuation(prev_seg, curr_seg)
+            
+            # Record skipped noise headers in evidence
+            if skipped_noise:
+                evidence['skipped_noise_headers'] = [s.get('segment_id') for s in skipped_noise]
+                evidence['skipped_noise_texts'] = [s.get('text', '')[:50] for s in skipped_noise]
+            
+            curr_seg['is_continuation'] = continuation
+            curr_seg['continuation_evidence'] = evidence
+            
+            if continuation != 'none':
+                skip_info = f" (skipped {len(skipped_noise)} noise headers)" if skipped_noise else ""
+                logger.info(f"Cross-page continuation: {prev_seg.get('segment_id')} -> "
+                           f"{curr_seg.get('segment_id')} ({continuation}, score: {evidence.get('final_score', 0):.2f}){skip_info}")
+        
+        return segments
+
+
+
+# =============================================================================
 # Logic Segmenter (Main Class - Enhanced)
 # =============================================================================
 
@@ -501,20 +1278,27 @@ class LogicSegmenter:
     """
     Main segmenter that processes flat_segments from parser_docling.py.
     
-    Pipeline v2.0:
+    Pipeline v2.3 (Three-Phase Architecture):
     1. Load segments from JSON
-    2. Group segments by logical rules (lists, procedures, definitions)
-    3. Analyze with POS tagging (enhanced with imperative detection)
-    4. Apply context overlap for RAG continuity
-    5. Enrich with tags (20+ including Theorem/Lemma/Proof)
-    6. Apply length constraints (min/max word counts)
-    7. Output standardized chunks
+    2. Apply Three-Phase Correction Pipeline (NEW v2.3):
+       - Phase 1: Column-based reading order correction
+       - Phase 2: Heading stack reconstruction
+       - Phase 3: Same-page backfilling for L1 headers
+    3. Annotate segments with continuation markers
+    4. Group segments by logical rules (lists, procedures, cross-page)
+    5. Analyze with POS tagging (enhanced with imperative detection)
+    6. Apply context overlap for RAG continuity
+    7. Enrich with tags (20+ including Theorem/Lemma/Proof)
+    8. Apply length constraints (min/max word counts)
+    9. Output standardized chunks with continuation metadata
     """
     
     def __init__(self, use_pos: bool = True, config: ChunkingConfig = None):
         self.config = config or ChunkingConfig()
         self.tag_detector = TagDetector()
         self.pos_analyzer = POSAnalyzer() if use_pos else None
+        self.continuation_detector = ContinuationDetector(self.config)
+        self.reading_order_corrector = ReadingOrderCorrector(self.config)  # NEW v2.3
         self.chunk_counter = 0
         self.previous_chunk_text = ""  # For overlap
     
@@ -539,21 +1323,52 @@ class LogicSegmenter:
         
         logger.info(f"Loaded {len(flat_segments)} segments")
         
+        # NEW v2.3: Apply Three-Phase Correction Pipeline
+        # This must run BEFORE continuation detection to ensure correct reading order
+        if (self.config.ENABLE_READING_ORDER_CORRECTION or 
+            self.config.ENABLE_HEADING_RECONSTRUCTION or 
+            self.config.ENABLE_BACKFILL_CORRECTION):
+            flat_segments = self.reading_order_corrector.process(flat_segments)
+            corrector_stats = self.reading_order_corrector.get_stats()
+        else:
+            corrector_stats = {}
+        
+        # Annotate segments with continuation markers
+        if self.config.ENABLE_CONTINUATION_DETECTION:
+            flat_segments = self.continuation_detector.annotate_segments(flat_segments)
+            continuation_count = sum(1 for s in flat_segments if s.get('is_continuation') != 'none')
+            logger.info(f"Detected {continuation_count} cross-page continuations")
+        
         # Process segments into chunks
         chunks = self._process_segments(flat_segments)
         
         # Post-process: merge short chunks and apply overlap
         chunks = self._post_process_chunks(chunks)
         
-        # Build output
+        # Build feature list
+        features = ["context_overlap", "imperative_detection", "theorem_tagging", "length_control"]
+        if self.config.ENABLE_READING_ORDER_CORRECTION:
+            features.append("reading_order_correction")
+        if self.config.ENABLE_HEADING_RECONSTRUCTION:
+            features.append("heading_reconstruction")
+        if self.config.ENABLE_BACKFILL_CORRECTION:
+            features.append("backfill_correction")
+        if self.config.ENABLE_CONTINUATION_DETECTION:
+            features.append("cross_page_continuation")
+        
+        # Calculate stats and include corrector stats
+        processing_stats = self._calculate_stats(chunks)
+        if corrector_stats:
+            processing_stats['reading_order_correction'] = corrector_stats
+        
         result = {
             "metadata": {
                 **metadata,
                 "total_chunks": len(chunks),
                 "total_segments": len(flat_segments),
-                "processing_version": "2.0",
-                "features": ["context_overlap", "imperative_detection", "theorem_tagging", "length_control"],
-                "processing_stats": self._calculate_stats(chunks)
+                "processing_version": "2.3",
+                "features": features,
+                "processing_stats": processing_stats
             },
             "chunks": [asdict(c) for c in chunks]
         }
@@ -565,81 +1380,257 @@ class LogicSegmenter:
     
     def _process_segments(self, segments: List[Dict]) -> List[EnrichedChunk]:
         """
-        Core processing logic:
-        1. Group related segments (lists, procedures)
-        2. Create enriched chunks
+        Core processing logic v2.2:
+        1. Handle cross-page continuations with evidence tracking
+        2. Group related segments (lists, procedures)
+        3. Create enriched chunks with continuation metadata and evidence
         """
         chunks = []
         buffer = []
         current_heading_path = ""
+        has_cross_page = False  # Track if current buffer spans pages
+        continuation_type = "none"  # Track continuation confidence
+        merge_evidences = []  # Collect all evidence for this buffer
         
-        for seg in segments:
+        for i, seg in enumerate(segments):
             seg_type = seg.get('type', 'Paragraph')
             heading_path = seg.get('heading_path', '')
+            is_continuation = seg.get('is_continuation', 'none')
+            continuation_evidence = seg.get('continuation_evidence', {})
             
-            # Rule 1: Headers start new chunks
-            if seg_type == 'Header':
-                # Flush buffer
-                if buffer:
-                    chunks.append(self._create_chunk(buffer, current_heading_path))
+            # =================================================================
+            # Rule 0 (v2.2): Cross-page continuation handling with evidence
+            # =================================================================
+            # If this segment is marked as a continuation, do NOT flush buffer
+            # Instead, continue accumulating to preserve paragraph integrity
+            if is_continuation in ['full', 'partial']:
+                # Track cross-page status
+                has_cross_page = True
+                if is_continuation == 'partial':
+                    continuation_type = 'partial'
+                elif continuation_type != 'partial':
+                    continuation_type = 'full'
+                
+                # Collect evidence for explainability
+                if continuation_evidence:
+                    merge_evidences.append(continuation_evidence)
+                
+                # Add to buffer and continue (skip other rules)
+                buffer.append(seg)
+                
+                # Log for debugging
+                score = continuation_evidence.get('final_score', 0)
+                logger.debug(f"Cross-page continuation: adding {seg.get('segment_id')} to buffer "
+                           f"(type: {is_continuation}, score: {score:.2f})")
+                
+                # Still check buffer size limit
+                if len(buffer) >= self.config.MAX_BUFFER_SEGMENTS * 2:  # Allow 2x for continuations
+                    chunk = self._create_chunk(buffer, current_heading_path)
+                    chunk.is_cross_page = has_cross_page
+                    chunk.continuation_type = continuation_type
+                    chunk.needs_review = (continuation_type == 'partial')
+                    chunk.merge_evidence = self._compile_merge_evidence(merge_evidences)
+                    chunks.append(chunk)
                     buffer = []
+                    has_cross_page = False
+                    continuation_type = "none"
+                    merge_evidences = []
+                continue
+            
+            # =================================================================
+            # Rule 1: Headers start new chunks
+            # =================================================================
+            if seg_type == 'Header':
+                # Flush buffer with cross-page metadata
+                if buffer:
+                    chunk = self._create_chunk(buffer, current_heading_path)
+                    chunk.is_cross_page = has_cross_page
+                    chunk.continuation_type = continuation_type
+                    chunk.needs_review = (continuation_type == 'partial')
+                    chunk.merge_evidence = self._compile_merge_evidence(merge_evidences)
+                    chunks.append(chunk)
+                    buffer = []
+                    has_cross_page = False
+                    continuation_type = "none"
+                    merge_evidences = []
                 current_heading_path = heading_path
                 # Headers themselves become chunks
                 chunks.append(self._create_chunk([seg], heading_path, chunk_type="header"))
                 continue
             
+            # =================================================================
             # Rule 2: ListItems should be grouped together
+            # =================================================================
             if seg_type == 'ListItem':
                 # If buffer has non-list items, flush first
                 if buffer and buffer[-1].get('type') != 'ListItem':
-                    chunks.append(self._create_chunk(buffer, current_heading_path))
+                    chunk = self._create_chunk(buffer, current_heading_path)
+                    chunk.is_cross_page = has_cross_page
+                    chunk.continuation_type = continuation_type
+                    chunk.needs_review = (continuation_type == 'partial')
+                    chunk.merge_evidence = self._compile_merge_evidence(merge_evidences)
+                    chunks.append(chunk)
                     buffer = []
+                    has_cross_page = False
+                    continuation_type = "none"
+                    merge_evidences = []
                 buffer.append(seg)
                 continue
             
+            # =================================================================
             # Rule 3: If we have ListItems in buffer and current is not ListItem, flush
+            # =================================================================
             if buffer and buffer[-1].get('type') == 'ListItem' and seg_type != 'ListItem':
-                chunks.append(self._create_chunk(buffer, current_heading_path, chunk_type="list"))
+                chunk = self._create_chunk(buffer, current_heading_path, chunk_type="list")
+                chunk.is_cross_page = has_cross_page
+                chunk.continuation_type = continuation_type
+                chunk.needs_review = (continuation_type == 'partial')
+                chunk.merge_evidence = self._compile_merge_evidence(merge_evidences)
+                chunks.append(chunk)
                 buffer = []
+                has_cross_page = False
+                continuation_type = "none"
+                merge_evidences = []
             
+            # =================================================================
             # Rule 4: Tables and Pictures are standalone chunks
+            # =================================================================
             if seg_type in ['Table', 'Picture', 'Formula']:
                 if buffer:
-                    chunks.append(self._create_chunk(buffer, current_heading_path))
+                    chunk = self._create_chunk(buffer, current_heading_path)
+                    chunk.is_cross_page = has_cross_page
+                    chunk.continuation_type = continuation_type
+                    chunk.needs_review = (continuation_type == 'partial')
+                    chunk.merge_evidence = self._compile_merge_evidence(merge_evidences)
+                    chunks.append(chunk)
                     buffer = []
+                    has_cross_page = False
+                    continuation_type = "none"
+                    merge_evidences = []
                 chunks.append(self._create_chunk([seg], heading_path, chunk_type=seg_type.lower()))
                 continue
             
+            # =================================================================
             # Rule 4.5: Learning Objectives are standalone chunks
+            # =================================================================
             if seg_type == 'LearningObjective':
                 if buffer:
-                    chunks.append(self._create_chunk(buffer, current_heading_path))
+                    chunk = self._create_chunk(buffer, current_heading_path)
+                    chunk.is_cross_page = has_cross_page
+                    chunk.continuation_type = continuation_type
+                    chunk.needs_review = (continuation_type == 'partial')
+                    chunk.merge_evidence = self._compile_merge_evidence(merge_evidences)
+                    chunks.append(chunk)
                     buffer = []
+                    has_cross_page = False
+                    continuation_type = "none"
+                    merge_evidences = []
                 chunks.append(self._create_chunk([seg], heading_path, chunk_type="learning_objective"))
                 continue
             
+            # =================================================================
             # Rule 5: Check for theorem/proof block starters
+            # =================================================================
             text = seg.get('text', '')
             if re.match(r'^(?:Theorem|Lemma|Proposition|Corollary|Proof)\s*\d*', text, re.IGNORECASE):
                 if buffer:
-                    chunks.append(self._create_chunk(buffer, current_heading_path))
+                    chunk = self._create_chunk(buffer, current_heading_path)
+                    chunk.is_cross_page = has_cross_page
+                    chunk.continuation_type = continuation_type
+                    chunk.needs_review = (continuation_type == 'partial')
+                    chunk.merge_evidence = self._compile_merge_evidence(merge_evidences)
+                    chunks.append(chunk)
                     buffer = []
+                    has_cross_page = False
+                    continuation_type = "none"
+                    merge_evidences = []
                 buffer.append(seg)
                 continue
             
+            # =================================================================
             # Default: Add to buffer
+            # =================================================================
             buffer.append(seg)
             
-            # Rule 6: Flush if buffer exceeds threshold (prevents very long chunks)
+            # =================================================================
+            # Rule 6: Flush if buffer exceeds threshold
+            # =================================================================
             if len(buffer) >= self.config.MAX_BUFFER_SEGMENTS:
-                chunks.append(self._create_chunk(buffer, current_heading_path))
+                chunk = self._create_chunk(buffer, current_heading_path)
+                chunk.is_cross_page = has_cross_page
+                chunk.continuation_type = continuation_type
+                chunk.needs_review = (continuation_type == 'partial')
+                chunk.merge_evidence = self._compile_merge_evidence(merge_evidences)
+                chunks.append(chunk)
                 buffer = []
+                has_cross_page = False
+                continuation_type = "none"
+                merge_evidences = []
         
         # Flush remaining buffer
         if buffer:
-            chunks.append(self._create_chunk(buffer, current_heading_path))
+            chunk = self._create_chunk(buffer, current_heading_path)
+            chunk.is_cross_page = has_cross_page
+            chunk.continuation_type = continuation_type
+            chunk.needs_review = (continuation_type == 'partial')
+            chunk.merge_evidence = self._compile_merge_evidence(merge_evidences)
+            chunks.append(chunk)
         
         return chunks
+    
+    def _compile_merge_evidence(self, evidences: List[Dict]) -> Dict[str, Any]:
+        """
+        Compile multiple evidence dicts into a summary for explainability.
+        
+        Returns a dict with:
+        - merge_count: Number of cross-page merges in this chunk
+        - avg_confidence: Average continuation score
+        - key_indicators: Most common triggering rules
+        - details: List of individual evidence entries (summarized)
+        """
+        if not evidences:
+            return {}
+        
+        # Calculate summary statistics
+        scores = [e.get('final_score', 0) for e in evidences]
+        avg_score = sum(scores) / len(scores) if scores else 0
+        
+        # Collect all triggered rules
+        all_triggers = []
+        for e in evidences:
+            all_triggers.extend(e.get('rules_triggered', []))
+        
+        # Count rule frequency
+        rule_counts = {}
+        for rule in all_triggers:
+            rule_counts[rule] = rule_counts.get(rule, 0) + 1
+        
+        # Get top indicators
+        top_indicators = sorted(rule_counts.items(), key=lambda x: -x[1])[:5]
+        
+        # Summarize individual merges
+        details = []
+        for e in evidences:
+            detail = {
+                "from": e.get('prev_segment_id', ''),
+                "to": e.get('curr_segment_id', ''),
+                "score": e.get('final_score', 0),
+                "decision": e.get('decision', 'none'),
+            }
+            # Add key score factors
+            breakdown = e.get('score_breakdown', {})
+            if breakdown:
+                high_scorers = [(k, v['score']) for k, v in breakdown.items() 
+                               if isinstance(v, dict) and v.get('score', 0) > 0]
+                detail["contributing_factors"] = [f"{k}: {v:.2f}" for k, v in high_scorers]
+            details.append(detail)
+        
+        return {
+            "merge_count": len(evidences),
+            "avg_confidence": round(avg_score, 3),
+            "key_indicators": [f"{k}: {v}x" for k, v in top_indicators],
+            "details": details
+        }
     
     def _post_process_chunks(self, chunks: List[EnrichedChunk]) -> List[EnrichedChunk]:
         """
@@ -837,12 +1828,18 @@ class LogicSegmenter:
         return "explanation"
     
     def _calculate_stats(self, chunks: List[EnrichedChunk]) -> Dict[str, Any]:
-        """Calculate processing statistics."""
+        """Calculate processing statistics including cross-page metrics."""
         type_counts = {}
         tag_counts = {}
         word_counts = []
         overlap_count = 0
         imperative_count = 0
+        
+        # NEW v2.1: Cross-page statistics
+        cross_page_count = 0
+        full_continuation_count = 0
+        partial_continuation_count = 0
+        needs_review_count = 0
         
         for chunk in chunks:
             # Count types
@@ -859,6 +1856,16 @@ class LogicSegmenter:
             for sent in chunk.sentences:
                 if sent.get('is_imperative', False):
                     imperative_count += 1
+            
+            # NEW v2.1: Cross-page continuation stats
+            if chunk.is_cross_page:
+                cross_page_count += 1
+            if chunk.continuation_type == 'full':
+                full_continuation_count += 1
+            elif chunk.continuation_type == 'partial':
+                partial_continuation_count += 1
+            if chunk.needs_review:
+                needs_review_count += 1
         
         return {
             "chunk_types": type_counts,
@@ -868,7 +1875,12 @@ class LogicSegmenter:
             "min_words": min(word_counts) if word_counts else 0,
             "max_words": max(word_counts) if word_counts else 0,
             "chunks_with_overlap": overlap_count,
-            "imperative_sentences_detected": imperative_count
+            "imperative_sentences_detected": imperative_count,
+            # NEW v2.1: Cross-page continuation stats
+            "cross_page_chunks": cross_page_count,
+            "full_continuations": full_continuation_count,
+            "partial_continuations": partial_continuation_count,
+            "chunks_needing_review": needs_review_count
         }
     
     def _save_json(self, data: Dict, path: str):
@@ -887,46 +1899,50 @@ if __name__ == "__main__":
     import sys
     logging.basicConfig(level=logging.INFO)
     
-    # Default paths
-    input_path = "testFloder/outputs/docling_json/An Introduction to Derivatives and Risk Management.json"
-    output_path = "testFloder/outputs/chunks/An Introduction to Derivatives and Risk Management.json"
+    # Base directory for the project
+    base_dir = Path(__file__).parent.parent
+    input_dir = base_dir / "outputs" / "docling_json"
+    output_dir = base_dir / "outputs" / "Chunks"
+    output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Allow CLI override
-    if len(sys.argv) > 1:
-        input_path = sys.argv[1]
-    if len(sys.argv) > 2:
-        output_path = sys.argv[2]
+    # Scan for JSON files from parser_docling
+    json_files = list(input_dir.glob("*.json"))
     
-    # Check if input exists
-    if not Path(input_path).exists():
-        print(f"Error: Input file not found: {input_path}")
-        sys.exit(1)
+    if not json_files:
+        print(f"No JSON files found in {input_dir}")
+        print("Please run parser_docling.py first.")
+        sys.exit(0)
     
-    # Process with custom config
+    print(f"Found {len(json_files)} files to process.")
+    
+    # Initialize segmenter
     config = ChunkingConfig()
     config.ENABLE_OVERLAP = True
     config.OVERLAP_SENTENCES = 2
-    
     segmenter = LogicSegmenter(use_pos=True, config=config)
-    result = segmenter.process_file(input_path, output_path)
     
-    # Print summary
-    stats = result['metadata']['processing_stats']
+    for input_path in json_files:
+        output_path = output_dir / input_path.name
+        
+        print(f"\n{'='*70}")
+        print(f"Processing: {input_path.name}")
+        print(f"Output: {output_path}")
+        print(f"{'='*70}")
+        
+        try:
+            result = segmenter.process_file(str(input_path), str(output_path))
+            
+            # Print summary for this file
+            stats = result['metadata']['processing_stats']
+            print(f"✓ Done - Generated {result['metadata']['total_chunks']} chunks")
+            print(f"  Avg words/chunk: {stats['avg_words_per_chunk']:.1f}")
+            print(f"  Cross-page continuations: {stats.get('cross_page_continuations', {}).get('total', 0)}")
+        except Exception as e:
+            print(f"✗ Error processing {input_path.name}: {e}")
+            import traceback
+            traceback.print_exc()
+    
     print(f"\n{'='*70}")
-    print(f"LogicSegmenter v2.0 - Processing Complete!")
+    print(f"All files processed successfully!")
     print(f"{'='*70}")
-    print(f"Total Chunks: {result['metadata']['total_chunks']}")
-    print(f"Total Segments: {result['metadata']['total_segments']}")
-    print(f"Features: {', '.join(result['metadata']['features'])}")
-    print(f"\n--- Word Count Stats ---")
-    print(f"  Avg words/chunk: {stats['avg_words_per_chunk']:.1f}")
-    print(f"  Min: {stats['min_words']}, Max: {stats['max_words']}")
-    print(f"\n--- New Features ---")
-    print(f"  Chunks with context overlap: {stats['chunks_with_overlap']}")
-    print(f"  Imperative sentences detected: {stats['imperative_sentences_detected']}")
-    print(f"\n--- Chunk Types ---")
-    for t, count in sorted(stats['chunk_types'].items(), key=lambda x: -x[1]):
-        print(f"  {t}: {count}")
-    print(f"\n--- Tag Distribution (Top 12) ---")
-    for tag, count in sorted(stats['tag_distribution'].items(), key=lambda x: -x[1])[:12]:
-        print(f"  {tag}: {count}")
+

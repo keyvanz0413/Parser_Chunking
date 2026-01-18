@@ -367,6 +367,263 @@ class EnhancedParser:
         traverse(hierarchy)
         return toc
 
+    # =============================================================================
+    # Page Position Detection for Cross-Page Continuation
+    # =============================================================================
+    
+    # Page dimension defaults (A4 in points: 595 x 842)
+    DEFAULT_PAGE_HEIGHT = 842.0
+    DEFAULT_PAGE_WIDTH = 595.0
+    
+    # Thresholds for page position detection
+    PAGE_TOP_THRESHOLD = 0.15      # Top 15% of page
+    PAGE_BOTTOM_THRESHOLD = 0.85   # Bottom 15% of page
+    COLUMN_THRESHOLD = 0.45        # Left/Right column boundary
+    
+    def _is_at_page_top(self, bbox: List[float], page_height: float = None) -> bool:
+        """Check if segment is at the top of the page."""
+        if not bbox or len(bbox) < 4:
+            return False
+        page_height = page_height or self.DEFAULT_PAGE_HEIGHT
+        # bbox format: [left, top, right, bottom] - top is y coordinate of upper edge
+        top_y = bbox[1]
+        return top_y < page_height * self.PAGE_TOP_THRESHOLD
+    
+    def _is_at_page_bottom(self, bbox: List[float], page_height: float = None) -> bool:
+        """Check if segment is at the bottom of the page."""
+        if not bbox or len(bbox) < 4:
+            return False
+        page_height = page_height or self.DEFAULT_PAGE_HEIGHT
+        # bbox format: [left, top, right, bottom] - bottom is y coordinate of lower edge
+        bottom_y = bbox[3]
+        return bottom_y > page_height * self.PAGE_BOTTOM_THRESHOLD
+    
+    def _infer_column_index(self, bbox: List[float], page_width: float = None) -> int:
+        """
+        Infer which column the segment belongs to.
+        
+        Returns:
+            0: Left column or single column
+            1: Right column
+            -1: Spanning (like headers)
+        """
+        if not bbox or len(bbox) < 4:
+            return 0
+        page_width = page_width or self.DEFAULT_PAGE_WIDTH
+        
+        left_x = bbox[0]
+        right_x = bbox[2]
+        center_x = (left_x + right_x) / 2
+        width_ratio = (right_x - left_x) / page_width
+        
+        # If width > 60% of page, it's spanning
+        if width_ratio > 0.6:
+            return -1
+        
+        # Otherwise, determine column by center position
+        if center_x < page_width * self.COLUMN_THRESHOLD:
+            return 0  # Left column
+        elif center_x > page_width * (1 - self.COLUMN_THRESHOLD):
+            return 1  # Right column
+        else:
+            return -1  # Center or spanning
+    
+    # =========================================================================
+    # Open clause detection - words that indicate incomplete sentence
+    # =========================================================================
+    
+    # Prepositions and conjunctions that shouldn't end a sentence
+    OPEN_CLAUSE_WORDS = {
+        # Prepositions
+        'of', 'to', 'for', 'with', 'in', 'on', 'at', 'by', 'from', 'into',
+        'through', 'during', 'before', 'after', 'above', 'below', 'between',
+        'under', 'over', 'about', 'against', 'among', 'around', 'without',
+        # Conjunctions
+        'and', 'or', 'but', 'nor', 'so', 'yet', 'both', 'either', 'neither',
+        # Articles (often indicate continuation)
+        'the', 'a', 'an',
+        # Relative pronouns / determiners
+        'that', 'which', 'who', 'whom', 'whose', 'where', 'when', 'while',
+        # Other incomplete indicators
+        'is', 'are', 'was', 'were', 'be', 'been', 'being',
+        'as', 'if', 'whether', 'although', 'because', 'since', 'unless',
+        'such', 'than', 'these', 'those', 'this', 'its',
+    }
+    
+    def _ends_with_hyphen(self, text: str) -> bool:
+        """
+        Detect if text ends with a hyphenated word (cross-line word break).
+        
+        Examples:
+        - "The deriva-" -> True (word continues on next line)
+        - "risk-free" -> False (valid compound word)
+        - "self-" -> True (incomplete)
+        """
+        if not text:
+            return False
+        text_stripped = text.rstrip()
+        if not text_stripped.endswith('-'):
+            return False
+        
+        # Get the last word (before hyphen)
+        words = text_stripped.split()
+        if not words:
+            return False
+        
+        last_word = words[-1]
+        
+        # If it's just a hyphen or very short, likely a continuation
+        if len(last_word) <= 2:
+            # Could be "a-" or similar
+            return True
+        
+        # Common compound words that legitimately end with hyphen followed by word
+        # These are usually mid-sentence, but if at end and short prefix, likely break
+        compound_prefixes = {'self', 'non', 'pre', 'post', 'anti', 'semi', 'multi', 'co', 're'}
+        word_before_hyphen = last_word.rstrip('-').lower()
+        
+        # If it's a known prefix, likely a word break
+        if word_before_hyphen in compound_prefixes:
+            return True
+        
+        # If the word before hyphen is partial (not a complete word), likely a break
+        # Simple heuristic: if ends with consonant cluster, likely incomplete
+        vowels = set('aeiouAEIOU')
+        if word_before_hyphen and word_before_hyphen[-1] not in vowels:
+            # Words rarely end with certain patterns legitimately
+            incomplete_endings = ('nv', 'rm', 'rt', 'rd', 'rs', 'rv', 'rg', 'nt', 'nd', 'ng', 
+                                  'ct', 'pt', 'ft', 'lt', 'mp', 'nk', 'sk', 'sp', 'st')
+            if len(word_before_hyphen) >= 2 and word_before_hyphen[-2:].lower() in incomplete_endings:
+                # This could be valid (like "end-") but at page boundary likely a break
+                pass
+            return True
+        
+        return False
+    
+    def _ends_with_open_clause(self, text: str) -> bool:
+        """
+        Detect if sentence ends with an open clause marker.
+        These words typically require continuation.
+        
+        Examples:
+        - "The value of" -> True (sentence continues)
+        - "calculated by" -> True
+        - "The result is 5." -> False (complete)
+        """
+        if not text:
+            return False
+        
+        text_stripped = text.rstrip()
+        # Remove trailing punctuation for check
+        text_clean = text_stripped.rstrip('.,;:!?')
+        
+        words = text_clean.split()
+        if not words:
+            return False
+        
+        last_word = words[-1].lower()
+        return last_word in self.OPEN_CLAUSE_WORDS
+    
+    def _has_sentence_fragment_pattern(self, text: str) -> bool:
+        """
+        Detect patterns that indicate a sentence fragment.
+        
+        Patterns:
+        - Text ending with a comma followed by nothing substantial
+        - Text ending mid-phrase (no verb structure)
+        - Very short segments that look like continuations
+        """
+        if not text:
+            return False
+        
+        text_stripped = text.rstrip()
+        
+        # Pattern 1: Ends with comma (often indicates continuation)
+        if text_stripped.endswith(','):
+            return True
+        
+        # Pattern 2: Mathematical expression that might continue
+        # e.g., "where x =" or "given that y >"
+        if re.search(r'[=<>≤≥±]\s*$', text_stripped):
+            return True
+        
+        # Pattern 3: Ellipsis or continuation markers
+        if text_stripped.endswith('...') or text_stripped.endswith('…'):
+            return True
+        
+        return False
+    
+    def _starts_like_continuation(self, text: str) -> bool:
+        """
+        Detect if text starts like it's continuing from previous context.
+        
+        Indicators:
+        - Starts with lowercase letter
+        - Starts with conjunction/connector
+        - Starts with pronoun referring to previous context
+        """
+        if not text:
+            return False
+        
+        text_stripped = text.strip()
+        if not text_stripped:
+            return False
+        
+        first_char = text_stripped[0]
+        
+        # Lowercase start is strong indicator
+        if first_char.islower():
+            return True
+        
+        # Check for continuation words at start
+        first_word = text_stripped.split()[0].lower().rstrip('.,;:')
+        continuation_starters = {
+            'and', 'or', 'but', 'nor', 'so', 'yet', 'also', 'however',
+            'therefore', 'thus', 'hence', 'moreover', 'furthermore',
+            'which', 'that', 'who', 'where', 'when', 'while',
+            'because', 'since', 'although', 'though', 'unless',
+            'as', 'if', 'whether', 'whereas',
+        }
+        
+        if first_word in continuation_starters:
+            return True
+        
+        return False
+    
+    def _detect_text_style(self, text: str, seg_type: str) -> Dict[str, Any]:
+        """
+        Detect text style hints for continuation matching.
+        
+        Enhanced with cross-page continuation detection rules:
+        - Hyphenation (word breaks)
+        - Open clause endings
+        - Sentence fragment patterns
+        - Continuation start patterns
+        """
+        text_stripped = text.rstrip() if text else ""
+        
+        # Terminal punctuation check
+        has_terminal = text_stripped.endswith(('.', '?', '!', ':', ';')) if text_stripped else False
+        
+        return {
+            # === Basic style hints ===
+            "starts_lowercase": text and text[0].islower(),
+            "ends_incomplete": text and not has_terminal,
+            "is_short": len(text.split()) < 10 if text else True,
+            "has_list_marker": bool(re.match(r'^[\d\-•●○▪]', text.strip())) if text else False,
+            "segment_type": seg_type,
+            
+            # === Enhanced cross-page detection (NEW) ===
+            "ends_with_hyphen": self._ends_with_hyphen(text),
+            "ends_with_open_clause": self._ends_with_open_clause(text),
+            "has_fragment_pattern": self._has_sentence_fragment_pattern(text),
+            "starts_like_continuation": self._starts_like_continuation(text),
+            
+            # === Confidence indicators ===
+            "has_terminal_punctuation": has_terminal,
+            "word_count": len(text.split()) if text else 0,
+        }
+
     def _extract_flat_segments(self, doc: DoclingDocument) -> List[Dict[str, Any]]:
         """
         Extract flat segments with full structural skeleton metadata.
@@ -381,6 +638,12 @@ class EnhancedParser:
         - heading_path: Full hierarchy path (e.g., "Chapter 1 > Section 1.1")
         - full_context_text: Context-prefixed text ready for embedding
         - tags: Placeholder for semantic tags (to be filled by MultiTagScanner)
+        
+        NEW (v2.1) - Cross-page continuation support:
+        - at_page_top: True if segment is in top 15% of page
+        - at_page_bottom: True if segment is in bottom 15% of page
+        - column_index: 0=left, 1=right, -1=spanning
+        - style_hints: Text style info for continuation matching
         """
         segments = []
         hierarchy = self._build_tree(doc)
@@ -389,16 +652,25 @@ class EnhancedParser:
         def flatten(node: Dict[str, Any]):
             if node["type"] != "Root":
                 segment_counter[0] += 1
+                bbox = node.get("bbox")
+                text = node["text"]
+                seg_type = node["type"]
+                
                 seg = {
                     "segment_id": f"seg_{segment_counter[0]:04d}",
-                    "type": node["type"],
-                    "text": node["text"],
+                    "type": seg_type,
+                    "text": text,
                     "page": node.get("page", 1),
-                    "bbox": node.get("bbox"),
+                    "bbox": bbox,
                     "depth": node.get("depth", 0),
                     "heading_path": node.get("heading_path", ""),
-                    "full_context_text": node.get("full_context_text", node["text"]),
-                    "tags": []  # Placeholder for MultiTagScanner (Step 2)
+                    "full_context_text": node.get("full_context_text", text),
+                    "tags": [],  # Placeholder for MultiTagScanner (Step 2)
+                    # Cross-page continuation metadata
+                    "at_page_top": self._is_at_page_top(bbox),
+                    "at_page_bottom": self._is_at_page_bottom(bbox),
+                    "column_index": self._infer_column_index(bbox),
+                    "style_hints": self._detect_text_style(text, seg_type),
                 }
                 # Include level for Header nodes
                 if node["type"] == "Header":
@@ -420,27 +692,41 @@ class EnhancedParser:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     
-    input_pdf = Path("testFloder/inputs/An Introduction to Derivatives and Risk Management.pdf")
-    output_dir = Path("testFloder/outputs/docling_json")
+    # Base directory for the project
+    base_dir = Path(__file__).parent.parent
+    input_dir = base_dir / "inputs"
+    output_dir = base_dir / "outputs" / "docling_json"
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    if not input_pdf.exists():
-        print(f"Error: Input file not found: {input_pdf}")
+    if not input_dir.exists():
+        print(f"Error: Input directory not found: {input_dir}")
         exit(1)
     
-    output_name = input_pdf.stem + ".json"
-    output_path = output_dir / output_name
+    # Scan for PDF files
+    pdf_files = list(input_dir.glob("*.pdf"))
     
-    print(f"Processing: {input_pdf.name}")
-    print(f"Output: {output_path}")
+    if not pdf_files:
+        print(f"No PDF files found in {input_dir}")
+        exit(0)
+    
+    print(f"Found {len(pdf_files)} PDF files to process.")
     
     parser = EnhancedParser()
     
-    try:
-        result = parser.parse_pdf(str(input_pdf), str(output_path))
-        print(f"✓ Done - Generated {len(result.get('flat_segments', []))} segments")
-        print(f"  Hierarchy depth: {len(result.get('toc', []))} top-level entries")
-    except Exception as e:
-        print(f"✗ Error: {e}")
-        import traceback
-        traceback.print_exc()
+    for input_pdf in pdf_files:
+        output_name = input_pdf.stem + ".json"
+        output_path = output_dir / output_name
+        
+        print(f"\n{'='*70}")
+        print(f"Processing: {input_pdf.name}")
+        print(f"Output: {output_path}")
+        print(f"{'='*70}")
+        
+        try:
+            result = parser.parse_pdf(str(input_pdf), str(output_path))
+            print(f"✓ Done - Generated {len(result.get('flat_segments', []))} segments")
+        except Exception as e:
+            print(f"✗ Error processing {input_pdf.name}: {e}")
+            import traceback
+            traceback.print_exc()
+
