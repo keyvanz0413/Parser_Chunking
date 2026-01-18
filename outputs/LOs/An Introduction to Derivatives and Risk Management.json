@@ -1,0 +1,117 @@
+{
+  "book": "An Introduction to Derivatives and Risk Management.json",
+  "total_los": 80,
+  "chapters_with_los": 15,
+  "learning_objectives": {
+    "Chapter 1": [
+      "Provide brief introductions to the different types of derivatives: options, forward contracts, futures contracts, and swaps",
+      "Reacquaint you with the concepts of risk preference, short selling, repurchase agreements, the riskreturn relationship, and market efficiency",
+      "Define the important concept of theoretical fair value, which will be used throughout the book",
+      "Explain the relationship between spot and derivative markets through the mechanisms of arbitrage, storage, and delivery",
+      "Identify the role that derivative markets play through their four main advantages",
+      "Address some criticisms"
+    ],
+    "Chapter 2": [
+      "Define and provide examples of put and call options, forwards, futures, and swaps",
+      "Review the origins and development of derivatives markets",
+      "Examine the characteristics of exchange-traded and over-the-counter derivatives",
+      "Discuss the clearing and settlement process for derivatives transactions",
+      "Identify the different types of participants in derivatives markets",
+      "Examine the basic transaction costs and tax considerations in derivatives trading",
+      "Survey the fundamental regulatory issues in derivatives"
+    ],
+    "Chapter 3": [
+      "Explain the role of arbitrage in option pricing, illustrating fundamental principles that determine an option's price, such as the minimum value, maximum value, value at expiration, and lower bound",
+      "Identify and explain the rationale for factors that affect an option's price, including stock price, exercise price, time to expiration, risk-free rate, and volatility",
+      "Explain the difference between American and European options and explain why early exercise may or may not occur",
+      "Understand the very important relationship of put-call parity"
+    ],
+    "Chapter 4": [
+      "Introduce the concept of an option pricing model",
+      "Provide a thorough treatment of the binomial option pricing model, in one- and twoperiod worlds, explaining how a riskfree hedge of stock and option is maintained through time",
+      "Show how the binomial model can be used to capture the effects of early exercise of puts and calls and properly reflect those effects in the price of the option",
+      "Illustrate how the binomial model can be extended for any number of time periods",
+      "Present an alternative way to specify the binomial model"
+    ],
+    "Chapter 5": [
+      "Present the BlackScholes-Merton model and learn how to use it to price options",
+      "Understand the relationship of the model's inputs to the option price",
+      "Learn how to adjust the model to accommodate dividends and put options",
+      "Understand how volatility is estimated, both historically and as the implied volatility",
+      "Observe how an option position is delta hedged and how the risk can be reduced by gamma hedging"
+    ],
+    "Chapter 6": [
+      "Introduce the three-way procedure for examining the risk and return of an option strategy: by equation, by graph, and by numerical example",
+      "Examine the basic strategies of buying and selling stock, calls, and puts",
+      "Examine the combination strategies of covered calls, protective puts, conversions, and reversals",
+      "Explain how the choice of exercise price affects the possible outcomes of a strategy",
+      "Explain how the length of the chosen holding period affects the outcomes of a strategy",
+      "Illustrate the accompanying software for analyzing option strategies"
+    ],
+    "Chapter 7": [
+      "Present and analyze the option spread strategies, including money spreads, collars, calendar spreads, and ratio spreads",
+      "Present and analyze the option combination strategies, including straddles and box spreads"
+    ],
+    "Chapter 8": [
+      "Introduce the basic concepts of price and value for futures and forward contracts",
+      "Show the conditions under which futures and forward prices are equivalent and when they are different",
+      "Show how the spot price of an asset is determined from the cost of storage, the net interest, and the risk premium",
+      "Present the cost of carry formula for the theoretical fair price of futures and forward contracts",
+      "Introduce the concepts of contango, backwardation, and convenience yield",
+      "Present the two opposing views to the question of whether futures prices reward speculators with a risk premium",
+      "Illustrate how intermediate cash flows such as dividends affect the cost of carry model",
+      "Present putcall-forward/futures parity",
+      "Present the principles of pricing options on futures"
+    ],
+    "Chapter 9": [
+      "Illustrate arbitrage strategies using shortterm interest rate futures, intermediateand long-term interest rate futures, stock index futures, and foreign exchange futures",
+      "Illustrate how to determine the cheapest-to-deliver bond on the Treasury bond futures contract",
+      "Examine delivery options on the Treasury bond futures contract"
+    ],
+    "Chapter 10": [
+      "Explain some of the reasons for and against hedging",
+      "Present the basic concepts associated with hedging, such as the basis, short and long hedging, and the risks of hedging",
+      "Identify the factors that are involved in deciding to undertake a hedge",
+      "Illustrate the different methods (price sensitivity, minimum variance) of determining the number of futures contracts to use in a hedge",
+      "Illustrate examples of intramarket and intermarket spread strategies",
+      "Review selected target strategies, including targeted duration, alpha capture, targeted beta, and tactical asset allocation"
+    ],
+    "Chapter 11": [
+      "Introduce the concept of a swap, which is a transaction to exchange a series of cash flows",
+      "Understand the three different types of swaps based on the underlying: currency, interest rate, and equity",
+      "Determine how to price and value the three different types of swaps",
+      "Illustrate strategies using the three different types of swaps",
+      "Introduce selected advanced issues including alternative discounting rates, adjusting swap values for credit risk, alternative views of swaps, and early termination"
+    ],
+    "Chapter 12": [
+      "Introduce the concept of a derivative on an interest rate, in contrast to a derivative on an asset",
+      "Understand the pricing, valuation, and use of forward rate agreements (FRAs), interest rate options, swaptions, and forward swaps"
+    ],
+    "Chapter 13": [
+      "Build on our previous coverage of the basics of derivatives by examining several new derivatives and strategies, some of which are combinations of previously studied derivatives and others of which are entirely new",
+      "Understand the strategy of portfolio insurance, see how it enables a portfolio to achieve a target minimum return, and illustrate how it can be implemented",
+      "Examine equity forwards, warrants, and equitylinked debt",
+      "Examine structured notes so as to understand how they are constructed and to gain an appreciation for their volatility",
+      "Understand mortgage securities, including pass-throughs, IOs, POs, and CMOs, and gain an understanding of how their values change as interest rates change",
+      "Examine various exotic options, including digital and chooser options, path-dependent options, and miscellaneous exotic options, and use the binomial model to price several of them",
+      "Be aware of unusual derivatives on electricity and weather"
+    ],
+    "Chapter 14": [
+      "Understand the concept and practice of risk management",
+      "Know the benefits of risk management",
+      "Know the difference between market and credit risks",
+      "Understand how market risk is managed using delta, gamma, and vega",
+      "Understand how to calculate and use value at risk",
+      "Understand how credit risk is determined and how firms control credit risk",
+      "Introduce credit derivatives",
+      "Be aware of risks other than market and credit risk"
+    ],
+    "Chapter 15": [
+      "Understand the differences in the practice of risk management by dealers and by end users",
+      "Know the principles that lead to an effective risk management organizational structure",
+      "Understand the basic principles of derivatives accounting",
+      "Examine some of the incidents in which companies have suffered losses using derivatives",
+      "Learn the important points related to the responsibilities of senior management for a company's derivatives and risk management function"
+    ]
+  }
+}
