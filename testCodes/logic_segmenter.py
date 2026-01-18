@@ -293,6 +293,7 @@ class ReadingOrderCorrector:
         Algorithm:
         1. Maintain a stack of (level, text) tuples representing current heading hierarchy
         2. For each Header segment:
+           - Skip noise headers (concluded, continued, etc.) - they don't affect hierarchy
            - Pop all entries with level >= current level
            - Push current header onto stack
         3. For each non-Header segment:
@@ -300,10 +301,33 @@ class ReadingOrderCorrector:
         
         This ensures consistent hierarchy regardless of original parsing order.
         """
+        # Import noise patterns from ContinuationDetector
+        noise_patterns = [
+            r'^\s*\(?\s*concluded\s*\)?\s*$',
+            r'^\s*\(?\s*continued\s*\)?\s*$',
+            r'^\s*\(?\s*cont\'?d?\s*\)?\s*$',
+        ]
+        compiled_patterns = [re.compile(p, re.IGNORECASE) for p in noise_patterns]
+        
+        def is_noise_header(seg):
+            if seg.get('type') != 'Header':
+                return False
+            text = seg.get('text', '').strip()
+            return any(p.match(text) for p in compiled_patterns)
+        
         stack = []  # [(level, text), ...]
         
         for seg in segments:
             if seg.get('type') == 'Header':
+                # Skip noise headers - they don't affect hierarchy
+                if is_noise_header(seg):
+                    seg['is_noise_header'] = True
+                    # Noise header inherits current path, doesn't change it
+                    seg['heading_path'] = self.PATH_SEPARATOR.join([t for _, t in stack])
+                    if seg.get('heading_path'):
+                        seg['full_context_text'] = f"[Path: {seg['heading_path']}] {seg.get('text', '')}"
+                    continue
+                
                 level = seg.get('level', 1)
                 text = seg.get('text', '').strip()
                 
@@ -1438,10 +1462,21 @@ class LogicSegmenter:
                 continue
             
             # =================================================================
-            # Rule 1: Headers start new chunks
+            # Rule 1: Headers start new chunks (with noise header exception)
             # =================================================================
             if seg_type == 'Header':
-                # Flush buffer with cross-page metadata
+                # Check if this is a noise header (concluded, continued, etc.)
+                # Noise headers should NOT break the continuation chain
+                is_noise = seg.get('is_noise_header', False) or self.continuation_detector._is_noise_header(seg)
+                
+                if is_noise:
+                    # Noise header: add to buffer without flushing
+                    # This preserves cross-page paragraph continuity
+                    buffer.append(seg)
+                    logger.debug(f"Skipping noise header {seg.get('segment_id')}: {seg.get('text', '')[:30]}")
+                    continue
+                
+                # Real header: Flush buffer with cross-page metadata
                 if buffer:
                     chunk = self._create_chunk(buffer, current_heading_path)
                     chunk.is_cross_page = has_cross_page
@@ -1553,19 +1588,35 @@ class LogicSegmenter:
             buffer.append(seg)
             
             # =================================================================
-            # Rule 6: Flush if buffer exceeds threshold
+            # Rule 6: Flush if buffer exceeds threshold (with lookahead)
+            # NEW v2.3: Check if next non-noise segment is a continuation
+            #           If so, delay flush to preserve paragraph integrity
             # =================================================================
             if len(buffer) >= self.config.MAX_BUFFER_SEGMENTS:
-                chunk = self._create_chunk(buffer, current_heading_path)
-                chunk.is_cross_page = has_cross_page
-                chunk.continuation_type = continuation_type
-                chunk.needs_review = (continuation_type == 'partial')
-                chunk.merge_evidence = self._compile_merge_evidence(merge_evidences)
-                chunks.append(chunk)
-                buffer = []
-                has_cross_page = False
-                continuation_type = "none"
-                merge_evidences = []
+                # Lookahead: check if upcoming segments form a continuation chain
+                should_delay_flush = False
+                for lookahead_idx in range(i + 1, min(i + 4, len(segments))):  # Look ahead up to 3 segments
+                    future_seg = segments[lookahead_idx]
+                    # Skip noise headers in lookahead
+                    if future_seg.get('is_noise_header', False):
+                        continue
+                    # If we find a continuation, delay the flush
+                    if future_seg.get('is_continuation') in ['full', 'partial']:
+                        should_delay_flush = True
+                        logger.debug(f"Delaying flush: upcoming {future_seg.get('segment_id')} is a continuation")
+                    break  # Only check the first non-noise segment
+                
+                if not should_delay_flush:
+                    chunk = self._create_chunk(buffer, current_heading_path)
+                    chunk.is_cross_page = has_cross_page
+                    chunk.continuation_type = continuation_type
+                    chunk.needs_review = (continuation_type == 'partial')
+                    chunk.merge_evidence = self._compile_merge_evidence(merge_evidences)
+                    chunks.append(chunk)
+                    buffer = []
+                    has_cross_page = False
+                    continuation_type = "none"
+                    merge_evidences = []
         
         # Flush remaining buffer
         if buffer:
