@@ -1473,18 +1473,23 @@ class POSAnalyzer:
             # Calculate relative position
             relative_pos = i / max(total_sentences, 1)
             
-            # Determine role with enhanced context
+            # Detect sentence form (NEW)
+            form = self._detect_form(sent_text, pos_tags, is_imperative)
+            
+            # Determine role/function with enhanced context
             role = self._determine_role(
                 sent_text, i, pos_tags, is_imperative,
                 heading_hint=heading_hint,
                 relative_pos=relative_pos,
                 is_first=(i == 0),
-                is_last=(i == total_sentences - 1)
+                is_last=(i == total_sentences - 1),
+                form=form  # Pass form for role adjustment
             )
             
             sentences.append({
                 "text": sent_text,
-                "role": role,
+                "role": role,           # Backward compatible
+                "form": form,           # NEW: sentence form
                 "pos_tags": pos_tags[:10],
                 "is_imperative": is_imperative
             })
@@ -1501,6 +1506,44 @@ class POSAnalyzer:
             if keyword in heading_lower:
                 return role
         return None
+    
+    def _detect_form(self, text: str, pos_tags: List[str], is_imperative: bool) -> str:
+        """
+        Detect sentence form (Layer 1 in discourse taxonomy).
+        
+        Forms:
+        - declarative: Statement (default)
+        - interrogative: Question (ends with ?)
+        - imperative: Command (verb-initial without subject)
+        - formula: Mathematical expression
+        - fragment: Incomplete/short text
+        
+        Returns:
+            One of: declarative, interrogative, imperative, formula, fragment
+        """
+        text_stripped = text.strip()
+        
+        # Interrogative: ends with question mark
+        if text_stripped.endswith('?'):
+            return "interrogative"
+        
+        # Imperative: already detected
+        if is_imperative:
+            return "imperative"
+        
+        # Formula: multiple math operators or equation patterns
+        if re.search(r'[=+\-*/^]{2,}', text) or re.search(r'\b\w+\s*=\s*\w+', text):
+            return "formula"
+        
+        # Fragment: very short or no verb
+        if len(text_stripped) < 10:
+            return "fragment"
+        if pos_tags and "VERB" not in pos_tags and "AUX" not in pos_tags:
+            if len(text_stripped) < 30:
+                return "fragment"
+        
+        # Default: declarative statement
+        return "declarative"
     
     def _is_imperative_sentence(self, sent) -> bool:
         """
@@ -1526,11 +1569,12 @@ class POSAnalyzer:
     def _determine_role(self, text: str, position: int, pos_tags: List[str], 
                         is_imperative: bool, heading_hint: Optional[str] = None,
                         relative_pos: float = 0.5, is_first: bool = False,
-                        is_last: bool = False) -> str:
+                        is_last: bool = False, form: str = "declarative") -> str:
         """
-        Determine sentence role with enhanced context awareness.
+        Determine sentence role/function with enhanced context awareness.
         
         Enhanced with:
+        - Form-aware role detection (interrogative -> question)
         - Evidence detection (statistics, percentages, trends)
         - Heading context (chapter/section hints)
         - Sentence position (first/last/relative)
@@ -1540,6 +1584,14 @@ class POSAnalyzer:
         """
         text_lower = text.lower()
         text_stripped = text.strip()
+        
+        # ============ QUESTION (interrogative form) ============
+        # Detect questions first - they have clear syntactic marker
+        if form == "interrogative":
+            # Check if it's a rhetorical question introducing a topic
+            if is_first or relative_pos < 0.2:
+                return "question"  # Could also be "topic", but question is more accurate
+            return "question"
         
         # ============ IRRELEVANT (with exceptions) ============
         if len(text_stripped) < 15:
