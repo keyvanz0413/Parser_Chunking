@@ -1348,8 +1348,60 @@ class TagDetector:
 class POSAnalyzer:
     """
     Uses spaCy for POS tagging and sentence role identification.
-    Enhanced with imperative verb detection per Reddit best practices.
+    
+    Enhanced with:
+    - Imperative verb detection
+    - Evidence detection (statistics, percentages, trends)
+    - Heading context awareness
+    - Sentence position features
     """
+    
+    # Evidence patterns for detecting data-driven sentences
+    EVIDENCE_PATTERNS = [
+        r'\b\d+(?:\.\d+)?\s*(?:%|percent)\b',                    # Percentages
+        r'\b(?:p\s*[<>=]\s*[\d.]+|significant(?:ly)?)\b',        # Statistical significance
+        r'\b(?:correlation|r\s*=|R²\s*=)\b',                     # Correlation measures
+        r'\b(?:increase[ds]?|decrease[ds]?|grew|rose|fell|declined)\s+(?:by|to)\s+[\d.]+',  # Trends
+        r'\$[\d,]+(?:\.\d+)?(?:\s*(?:million|billion|trillion))?', # Financial values
+        r'\b\d+\s*(?:bps|basis\s+points?|bp)\b',                 # Basis points
+        r'\b(?:CI|confidence\s+interval)\s*[=:\s]*',             # Confidence intervals
+        r'\b(?:mean|median|average|std|standard\s+deviation)\s*[=:\s]*[\d.]+', # Statistics
+        r'\b(?:ratio|rate|yield)\s+(?:of|is|was|=)\s*[\d.]+',    # Ratios/rates
+    ]
+    
+    # Heading keywords that suggest specific roles
+    HEADING_ROLE_HINTS = {
+        'example': 'example',
+        'case study': 'example',
+        'illustration': 'example',
+        'limitation': 'limitation',
+        'constraint': 'limitation',
+        'caveat': 'limitation',
+        'method': 'procedure',
+        'approach': 'procedure',
+        'procedure': 'procedure',
+        'how to': 'procedure',
+        'result': 'evidence',
+        'finding': 'evidence',
+        'data': 'evidence',
+        'empirical': 'evidence',
+        'conclusion': 'conclusion',
+        'summary': 'conclusion',
+        'takeaway': 'conclusion',
+        'definition': 'definition',
+        'what is': 'definition',
+        'assumption': 'assumption',
+        'hypothesis': 'assumption',
+    }
+    
+    # Short sentence exceptions - don't mark as irrelevant
+    SHORT_SENTENCE_EXCEPTIONS = [
+        r'\d+(?:\.\d+)?%',              # Percentages
+        r'\$[\d,]+',                     # Currency
+        r'(?:figure|table|exhibit)\s*\d', # References
+        r'[=<>±]\s*\d',                  # Math expressions
+        r'\b\d+\s*(?:bps|bp)\b',         # Basis points
+    ]
     
     def __init__(self, model_name: str = "en_core_web_md"):
         global nlp
@@ -1363,50 +1415,92 @@ class POSAnalyzer:
                 nlp = None
         self.nlp = nlp
         self.tag_detector = TagDetector()
+        
+        # Compile patterns for efficiency
+        self._evidence_patterns = [re.compile(p, re.IGNORECASE) for p in self.EVIDENCE_PATTERNS]
+        self._short_exceptions = [re.compile(p, re.IGNORECASE) for p in self.SHORT_SENTENCE_EXCEPTIONS]
     
-    def analyze_sentences(self, text: str) -> List[Dict[str, Any]]:
+    def analyze_sentences(self, text: str, heading_path: str = "") -> List[Dict[str, Any]]:
         """
         Analyze text and return sentences with roles.
         
-        Roles:
-        - topic: Introduces main idea (usually first sentence)
-        - definition: Contains definition pattern
-        - example: Contains example indicator
-        - conclusion: Summarizes or concludes
-        - procedural: Step-by-step instruction
-        - imperative: Command/instruction starting with verb
-        - evidence: Supporting evidence or data
+        Enhanced with heading context and position awareness.
+        
+        Args:
+            text: The text to analyze
+            heading_path: The heading path for context (e.g., "Chapter 1 > Examples")
+        
+        Roles (15 types):
+        - topic: Introduces main idea
+        - definition: Concept definitions
+        - example: Examples and illustrations
+        - evidence: Data, statistics, measurements (NEW)
+        - formula: Mathematical expressions
+        - procedure: Step-by-step instructions
+        - mechanism: How something works
+        - assumption: Prerequisites/conditions
+        - interpretation: Explaining meaning
+        - limitation: Constraints/boundaries
+        - comparison: Comparing concepts
+        - application: Practical use cases
+        - reference: Figure/Table references
+        - conclusion: Summary statements
         - explanation: Default explanatory content
+        - irrelevant: Low semantic value
         """
         if self.nlp is None:
-            # Fallback: simple sentence split without POS
             return [{"text": text.strip(), "role": "explanation", "pos_tags": [], "is_imperative": False}]
         
         doc = self.nlp(text)
         sentences = []
+        sent_list = list(doc.sents)
+        total_sentences = len(sent_list)
         
-        for i, sent in enumerate(doc.sents):
+        # Get heading context hint
+        heading_hint = self._get_heading_hint(heading_path)
+        
+        for i, sent in enumerate(sent_list):
             sent_text = sent.text.strip()
             if not sent_text:
                 continue
-                
+            
             # Extract POS tags
             pos_tags = [token.pos_ for token in sent]
             
-            # Check for imperative (verb at start)
+            # Check for imperative
             is_imperative = self._is_imperative_sentence(sent)
             
-            # Determine role based on position, content, and POS
-            role = self._determine_role(sent_text, i, pos_tags, is_imperative)
+            # Calculate relative position
+            relative_pos = i / max(total_sentences, 1)
+            
+            # Determine role with enhanced context
+            role = self._determine_role(
+                sent_text, i, pos_tags, is_imperative,
+                heading_hint=heading_hint,
+                relative_pos=relative_pos,
+                is_first=(i == 0),
+                is_last=(i == total_sentences - 1)
+            )
             
             sentences.append({
                 "text": sent_text,
                 "role": role,
-                "pos_tags": pos_tags[:10],  # Limit for storage
+                "pos_tags": pos_tags[:10],
                 "is_imperative": is_imperative
             })
         
         return sentences
+    
+    def _get_heading_hint(self, heading_path: str) -> Optional[str]:
+        """Extract role hint from heading path."""
+        if not heading_path:
+            return None
+        
+        heading_lower = heading_path.lower()
+        for keyword, role in self.HEADING_ROLE_HINTS.items():
+            if keyword in heading_lower:
+                return role
+        return None
     
     def _is_imperative_sentence(self, sent) -> bool:
         """
@@ -1430,43 +1524,32 @@ class POSAnalyzer:
         return first_word in self.tag_detector.IMPERATIVE_VERBS
     
     def _determine_role(self, text: str, position: int, pos_tags: List[str], 
-                        is_imperative: bool) -> str:
+                        is_imperative: bool, heading_hint: Optional[str] = None,
+                        relative_pos: float = 0.5, is_first: bool = False,
+                        is_last: bool = False) -> str:
         """
-        Determine sentence role based on content, position, and POS.
+        Determine sentence role with enhanced context awareness.
         
-        15 Roles (aligned with Senior's requirements):
+        Enhanced with:
+        - Evidence detection (statistics, percentages, trends)
+        - Heading context (chapter/section hints)
+        - Sentence position (first/last/relative)
+        - Short sentence exception handling
         
-        === Core Content Roles ===
-        1. definition - Concept definitions
-        2. explanation - General explanatory content (default)
-        3. example - Examples and illustrations
-        4. formula - Mathematical expressions
-        5. procedure - Step-by-step instructions (includes imperative)
-        
-        === Semantic Relationship Roles ===
-        6. mechanism - How something works
-        7. assumption - Prerequisites/starting conditions
-        8. interpretation - Explaining meaning/implications
-        9. limitation - Constraints/boundaries
-        10. comparison - Comparing/contrasting concepts
-        11. application - Practical use cases
-        
-        === Structural Roles ===
-        12. reference - Figure/Table/Citation references
-        13. conclusion - Summary/concluding statements
-        14. topic - Opening/main idea sentence
-        
-        === Special ===
-        15. irrelevant - Low semantic value (boilerplate, filler)
+        Priority order ensures most specific roles are checked first.
         """
         text_lower = text.lower()
         text_stripped = text.strip()
         
-        # ============ IRRELEVANT (check first) ============
-        # Short sentences with no semantic content
+        # ============ IRRELEVANT (with exceptions) ============
         if len(text_stripped) < 15:
-            return "irrelevant"
-        # Boilerplate patterns
+            # Check exceptions before marking as irrelevant
+            has_exception = any(p.search(text) for p in self._short_exceptions)
+            if not has_exception:
+                return "irrelevant"
+            # If exception found, continue to other rules
+        
+        # Boilerplate patterns (always irrelevant)
         if re.search(r"^\s*(see\s+(?:also|below|above)|page\s+\d+|continued|ibid)\s*$", text_lower):
             return "irrelevant"
         
@@ -1475,6 +1558,11 @@ class POSAnalyzer:
             return "procedure"
         if re.search(r"\b(step\s+\d|first|second|third|finally)\b", text_lower):
             return "procedure"
+        
+        # ============ EVIDENCE (NEW - data-driven sentences) ============
+        # Check evidence patterns - this should come before formula
+        if any(p.search(text) for p in self._evidence_patterns):
+            return "evidence"
         
         # ============ DEFINITION ============
         if re.search(r"\bis\s+(defined\s+as|a\s+\w+\s+that)\b", text_lower):
@@ -1488,31 +1576,31 @@ class POSAnalyzer:
         if re.search(r"\bequation\b|\bformula\b|\bwhere\s+\w+\s*=", text_lower):
             return "formula"
         
-        # ============ REFERENCE (per Senior: "Figure Y shows...") ============
+        # ============ REFERENCE (Figure/Table references) ============
         if re.search(r"\b(figure|table|exhibit|chart)\s+\d", text_lower):
             return "reference"
         if re.search(r"(?:as\s+)?(?:shown|illustrated|presented)\s+in", text_lower):
             return "reference"
         
-        # ============ MECHANISM (per Senior) ============
+        # ============ MECHANISM ============
         if re.search(r"\b(mechanism|process|works?\s+by|functions?\s+by|how\s+\w+\s+works?)\b", text_lower):
             return "mechanism"
         
-        # ============ INTERPRETATION (per Senior) ============
+        # ============ INTERPRETATION ============
         if re.search(r"\b(this\s+(?:means|implies|suggests)|interpret|in\s+other\s+words)\b", text_lower):
             return "interpretation"
         
-        # ============ LIMITATION (per Senior) ============
+        # ============ LIMITATION ============
         if re.search(r"\b(limitation|constraint|caveat|does\s+not\s+(?:apply|work)|only\s+works?\s+(?:when|if))\b", text_lower):
             return "limitation"
         
-        # ============ COMPARISON (includes contrast per Senior) ============
+        # ============ COMPARISON ============
         if re.search(r"\b(compar|contrast|unlike|whereas|similar|differ)\b", text_lower):
             return "comparison"
         if re.search(r"\b(more|less|greater|smaller)\s+than\b", text_lower):
             return "comparison"
         
-        # ============ ASSUMPTION (per Senior) ============
+        # ============ ASSUMPTION ============
         if re.search(r"\b(assume|assuming|given\s+that|suppose|provided\s+that)\b", text_lower):
             return "assumption"
         if re.search(r"^(?:If|When|Suppose|Assume|Given)\b", text):
@@ -1527,11 +1615,26 @@ class POSAnalyzer:
             return "example"
         
         # ============ CONCLUSION ============
-        if re.search(r"\b(therefore|thus|hence|in\s+conclusion|as\s+a\s+result|consequently)\b", text_lower):
+        # Check explicit conclusion markers
+        if re.search(r"\b(therefore|thus|hence|in\s+conclusion|as\s+a\s+result|consequently|overall)\b", text_lower):
+            return "conclusion"
+        # Position-based hint: last sentence with conclusion-like structure
+        if is_last and re.search(r"\b(summary|overall|ultimately)\b", text_lower):
             return "conclusion"
         
         # ============ TOPIC (first sentence with verb) ============
-        if position == 0 and "VERB" in pos_tags:
+        if is_first and "VERB" in pos_tags:
+            return "topic"
+        
+        # ============ HEADING CONTEXT HINT ============
+        # Use heading hint as fallback before defaulting to explanation
+        if heading_hint:
+            # Only apply if no stronger signal was found
+            return heading_hint
+        
+        # ============ POSITION-BASED HINTS ============
+        # Opening sentences in a paragraph more likely to be topic
+        if relative_pos < 0.15 and "VERB" in pos_tags:
             return "topic"
         
         # ============ DEFAULT ============
@@ -2564,10 +2667,10 @@ class LogicSegmenter:
             if "procedure" not in tags:
                 tags.append("procedure")
         
-        # Analyze sentences with POS
+        # Analyze sentences with POS (enhanced with heading context)
         sentences = []
         if self.pos_analyzer and full_text:
-            sentences = self.pos_analyzer.analyze_sentences(full_text)
+            sentences = self.pos_analyzer.analyze_sentences(full_text, heading_path)
         
         # Determine chunk type if not provided
         if chunk_type is None:
