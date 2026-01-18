@@ -1,0 +1,18 @@
+# Parser_Chunking Project Dependencies
+# =====================================
+
+# Core PDF parsing
+docling>=2.0.0
+
+# NLP processing
+spacy>=3.7.0
+
+# Data processing (standard library modules used, but these are common utilities)
+# json, re, logging, pathlib - built-in, no installation needed
+
+# SpaCy model setup (run after installing spacy):
+# python -m spacy download en_core_web_md
+
+# Optional: For metadata extraction (if using PDFMetadataExtractor)
+# google-cloud-vision>=3.0.0
+# requests>=2.28.0
