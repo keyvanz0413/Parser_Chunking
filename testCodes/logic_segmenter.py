@@ -104,9 +104,25 @@ class SentenceRole:
 
 
 @dataclass
+class Reference:
+    """
+    Represents a reference to a Figure/Table/Equation within a chunk.
+    
+    Used for cross-linking paragraph chunks with visual/structural blocks.
+    """
+    ref_text: str              # Original reference text (e.g., "Figure 1.1")
+    start_offset: int          # Start position in chunk content
+    end_offset: int            # End position in chunk content
+    target_segment_id: str     # Segment ID of the referenced block (or None)
+    target_type: str           # "Figure", "Table", "Equation", "Formula"
+    ref_kind: str              # "explicit" or "implicit"
+    confidence: float = 0.0    # Confidence score (0.0-1.0)
+
+
+@dataclass
 class EnrichedChunk:
     """
-    Core Schema v2.1 - The standardized output format with overlap and continuation support.
+    Core Schema v2.2 - The standardized output format with references support.
     
     Fields:
     - chunk_id: Unique identifier
@@ -120,11 +136,14 @@ class EnrichedChunk:
     - page_range: Page numbers covered by this chunk
     - word_count: Approximate word count for length analysis
     
-    NEW (v2.1) - Cross-page continuation:
+    Cross-page continuation:
     - is_cross_page: True if chunk spans multiple pages
     - continuation_type: 'none', 'full' (confident), 'partial' (needs review)
     - needs_review: True if continuation detection was uncertain
     - merge_evidence: Dict with reasons for merge decision (explainability)
+    
+    NEW: Figure/Table/Equation references:
+    - references: List of detected references to visual/structural blocks
     """
     chunk_id: str
     heading_path: str
@@ -137,11 +156,13 @@ class EnrichedChunk:
     page_range: List[int] = field(default_factory=list)
     depth: int = 0
     word_count: int = 0
-    # NEW v2.1: Cross-page continuation fields
+    # Cross-page continuation fields
     is_cross_page: bool = False
     continuation_type: str = "none"  # none, full, partial
     needs_review: bool = False
-    merge_evidence: Dict[str, Any] = field(default_factory=dict)  # Explainability
+    merge_evidence: Dict[str, Any] = field(default_factory=dict)
+    # NEW: Reference detection
+    references: List[Reference] = field(default_factory=list)
     
 
 # =============================================================================
@@ -511,6 +532,296 @@ class DehyphenationHelper:
     
     def get_stats(self) -> Dict[str, int]:
         """Return repair statistics."""
+        return self._stats.copy()
+
+
+# =============================================================================
+# Reference Detector (NEW)
+# =============================================================================
+
+class ReferenceDetector:
+    """
+    Detects references to Figure/Table/Equation blocks within paragraph text.
+    
+    Supports two types of references:
+    1. Explicit: "Figure 1.1", "Table 2.3", "Equation (5)"
+    2. Implicit: "the figure above", "this table", "as shown below"
+    
+    Usage:
+        detector = ReferenceDetector(config)
+        catalog = detector.build_block_catalog(segments)
+        refs = detector.detect_references(content, page, catalog)
+    """
+    
+    # Explicit reference patterns by type
+    EXPLICIT_PATTERNS = {
+        "Figure": [
+            r'\b(?:Figure|Fig\.?)\s*(\d+(?:\.\d+)?(?:\s*\([a-z]\))?)',
+        ],
+        "Table": [
+            r'\b(?:Table|Tbl\.?)\s*(\d+(?:\.\d+)?)',
+        ],
+        "Equation": [
+            r'\b(?:Equation|Eq\.?)\s*\((\d+)\)',
+            r'\b(?:Formula)\s*\((\d+)\)',
+        ],
+        "Exhibit": [
+            r'\b(?:Exhibit)\s*(\d+(?:\.\d+)?)',
+        ],
+    }
+    
+    # Implicit reference patterns
+    IMPLICIT_PATTERNS = {
+        "above": [
+            r'\b(?:the|this)\s+(?:figure|table|chart|graph|diagram)\s+(?:above|shown above)',
+            r'\b(?:above|preceding)\s+(?:figure|table|chart)',
+        ],
+        "below": [
+            r'\b(?:the|this)\s+(?:figure|table|chart|graph|diagram)\s+(?:below|shown below)',
+            r'\b(?:following|below)\s+(?:figure|table|chart)',
+        ],
+        "this": [
+            r'\b(?:this|that)\s+(?:figure|table|equation|chart|diagram)',
+        ],
+        "see": [
+            r'\b(?:see|refer to)\s+(?:the\s+)?(?:figure|table)(?:\s+(?:above|below))?',
+        ],
+    }
+    
+    # Block types to track
+    BLOCK_TYPES = {'Figure', 'Table', 'Formula', 'Picture', 'Equation'}
+    
+    def __init__(self, config: ChunkingConfig = None):
+        self.config = config or ChunkingConfig()
+        self._stats = {
+            "explicit_refs": 0,
+            "implicit_refs": 0,
+            "resolved": 0,
+            "unresolved": 0,
+        }
+        
+        # Compile patterns
+        self._explicit_compiled = {}
+        for ref_type, patterns in self.EXPLICIT_PATTERNS.items():
+            self._explicit_compiled[ref_type] = [
+                re.compile(p, re.IGNORECASE) for p in patterns
+            ]
+        
+        self._implicit_compiled = {}
+        for direction, patterns in self.IMPLICIT_PATTERNS.items():
+            self._implicit_compiled[direction] = [
+                re.compile(p, re.IGNORECASE) for p in patterns
+            ]
+    
+    def build_block_catalog(self, segments: List[Dict]) -> Dict[str, Any]:
+        """
+        Build a catalog of all Figure/Table/Equation blocks from segments.
+        
+        Returns:
+            Dict with:
+            - by_caption: caption_id -> segment info
+            - by_segment_id: segment_id -> segment info
+            - by_page: page_num -> list of block segments
+        """
+        catalog = {
+            "by_caption": {},
+            "by_segment_id": {},
+            "by_page": {},
+        }
+        
+        for seg in segments:
+            seg_type = seg.get('type', '')
+            
+            # Check if this is a block type
+            if seg_type in self.BLOCK_TYPES:
+                segment_id = seg.get('segment_id', '')
+                page = seg.get('page', 0)
+                text = seg.get('text', '')
+                bbox = seg.get('bbox', [])
+                
+                # Try to extract caption ID
+                caption_id = self._extract_caption_id(text, seg_type)
+                
+                block_info = {
+                    'segment_id': segment_id,
+                    'type': seg_type,
+                    'page': page,
+                    'bbox': bbox,
+                    'text': text[:100],  # Preview
+                    'caption_id': caption_id,
+                }
+                
+                # Store in catalog
+                catalog['by_segment_id'][segment_id] = block_info
+                
+                if caption_id:
+                    catalog['by_caption'][caption_id] = block_info
+                
+                if page not in catalog['by_page']:
+                    catalog['by_page'][page] = []
+                catalog['by_page'][page].append(block_info)
+        
+        logger.debug(f"ReferenceDetector: Built catalog with {len(catalog['by_segment_id'])} blocks, "
+                    f"{len(catalog['by_caption'])} with caption IDs")
+        
+        return catalog
+    
+    def detect_references(self, content: str, chunk_page: int, 
+                         catalog: Dict, chunk_bbox: List = None) -> List[Reference]:
+        """
+        Detect all references to blocks within chunk content.
+        
+        Args:
+            content: Chunk text content
+            chunk_page: Page number of the chunk
+            catalog: Block catalog from build_block_catalog()
+            chunk_bbox: Optional bbox of the chunk for proximity calculation
+            
+        Returns:
+            List of Reference objects
+        """
+        if not content:
+            return []
+        
+        refs = []
+        
+        # 1. Detect explicit references
+        for ref_type, patterns in self._explicit_compiled.items():
+            for pattern in patterns:
+                for match in pattern.finditer(content):
+                    ref_text = match.group(0)
+                    ref_id = match.group(1)
+                    caption_id = self._normalize_caption_id(ref_type, ref_id)
+                    
+                    # Try to resolve target
+                    target = catalog['by_caption'].get(caption_id)
+                    
+                    refs.append(Reference(
+                        ref_text=ref_text,
+                        start_offset=match.start(),
+                        end_offset=match.end(),
+                        target_segment_id=target['segment_id'] if target else "",
+                        target_type=ref_type,
+                        ref_kind="explicit",
+                        confidence=0.95 if target else 0.5
+                    ))
+                    
+                    self._stats['explicit_refs'] += 1
+                    if target:
+                        self._stats['resolved'] += 1
+                    else:
+                        self._stats['unresolved'] += 1
+        
+        # 2. Detect implicit references
+        for direction, patterns in self._implicit_compiled.items():
+            for pattern in patterns:
+                for match in pattern.finditer(content):
+                    ref_text = match.group(0)
+                    
+                    # Infer type from text
+                    ref_type = self._infer_type_from_text(ref_text)
+                    
+                    # Try to resolve by proximity
+                    target = self._resolve_implicit(
+                        direction, ref_type, chunk_page, catalog, chunk_bbox
+                    )
+                    
+                    refs.append(Reference(
+                        ref_text=ref_text,
+                        start_offset=match.start(),
+                        end_offset=match.end(),
+                        target_segment_id=target['segment_id'] if target else "",
+                        target_type=ref_type,
+                        ref_kind="implicit",
+                        confidence=0.7 if target else 0.3
+                    ))
+                    
+                    self._stats['implicit_refs'] += 1
+                    if target:
+                        self._stats['resolved'] += 1
+                    else:
+                        self._stats['unresolved'] += 1
+        
+        return refs
+    
+    def _extract_caption_id(self, text: str, block_type: str) -> Optional[str]:
+        """Extract caption ID from block text (e.g., 'Figure 1.1: Title')."""
+        if not text:
+            return None
+        
+        # Try to match caption patterns
+        patterns = {
+            'Figure': r'^(?:Figure|Fig\.?)\s*(\d+(?:\.\d+)?)',
+            'Table': r'^(?:Table|Tbl\.?)\s*(\d+(?:\.\d+)?)',
+            'Picture': r'^(?:Figure|Fig\.?)\s*(\d+(?:\.\d+)?)',
+            'Formula': r'^(?:Equation|Eq\.?)\s*\((\d+)\)',
+            'Equation': r'^(?:Equation|Eq\.?)\s*\((\d+)\)',
+        }
+        
+        pattern = patterns.get(block_type)
+        if pattern:
+            match = re.match(pattern, text.strip(), re.IGNORECASE)
+            if match:
+                return self._normalize_caption_id(block_type, match.group(1))
+        
+        return None
+    
+    def _normalize_caption_id(self, ref_type: str, ref_id: str) -> str:
+        """Normalize caption ID for matching (e.g., 'Figure 1.1')."""
+        # Clean up the ID
+        clean_id = ref_id.strip()
+        # Map Picture to Figure
+        display_type = "Figure" if ref_type == "Picture" else ref_type
+        return f"{display_type} {clean_id}"
+    
+    def _infer_type_from_text(self, text: str) -> str:
+        """Infer block type from implicit reference text."""
+        text_lower = text.lower()
+        if 'figure' in text_lower or 'chart' in text_lower or 'graph' in text_lower or 'diagram' in text_lower:
+            return "Figure"
+        elif 'table' in text_lower:
+            return "Table"
+        elif 'equation' in text_lower or 'formula' in text_lower:
+            return "Equation"
+        return "Figure"  # Default
+    
+    def _resolve_implicit(self, direction: str, ref_type: str, 
+                         page: int, catalog: Dict, chunk_bbox: List = None) -> Optional[Dict]:
+        """
+        Resolve implicit reference by proximity.
+        
+        Args:
+            direction: 'above', 'below', 'this', 'see'
+            ref_type: Expected block type
+            page: Current page
+            catalog: Block catalog
+            chunk_bbox: Optional chunk bbox for proximity
+            
+        Returns:
+            Best matching block info or None
+        """
+        # Get blocks on same page
+        page_blocks = catalog['by_page'].get(page, [])
+        
+        # Filter by type
+        type_map = {"Figure": ["Figure", "Picture"], "Table": ["Table"], "Equation": ["Formula", "Equation"]}
+        valid_types = type_map.get(ref_type, [ref_type])
+        candidates = [b for b in page_blocks if b['type'] in valid_types]
+        
+        if not candidates:
+            return None
+        
+        # For now, return the first/last based on direction
+        # TODO: Use bbox proximity for better resolution
+        if direction == 'above':
+            return candidates[0]  # First block on page
+        elif direction == 'below':
+            return candidates[-1]  # Last block on page
+        else:
+            return candidates[0]  # Default to first
+    
+    def get_stats(self) -> Dict[str, int]:
+        """Return detection statistics."""
         return self._stats.copy()
 
 
@@ -1723,9 +2034,11 @@ class LogicSegmenter:
         self.tag_detector = TagDetector()
         self.pos_analyzer = POSAnalyzer() if use_pos else None
         self.continuation_detector = ContinuationDetector(self.config)
-        self.reading_order_corrector = ReadingOrderCorrector(self.config)  # NEW v2.3
+        self.reading_order_corrector = ReadingOrderCorrector(self.config)
+        self.reference_detector = ReferenceDetector(self.config)  # NEW: Reference detection
         self.chunk_counter = 0
         self.previous_chunk_text = ""  # For overlap
+        self.block_catalog = None  # Will be populated during processing
     
     def process_file(self, input_json_path: str, output_path: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -1764,6 +2077,11 @@ class LogicSegmenter:
             continuation_count = sum(1 for s in flat_segments if s.get('is_continuation') != 'none')
             logger.info(f"Detected {continuation_count} cross-page continuations")
         
+        # Build block catalog for reference detection
+        self.block_catalog = self.reference_detector.build_block_catalog(flat_segments)
+        logger.info(f"Built block catalog: {len(self.block_catalog['by_segment_id'])} blocks, "
+                   f"{len(self.block_catalog['by_caption'])} with captions")
+        
         # Process segments into chunks
         chunks = self._process_segments(flat_segments)
         
@@ -1784,6 +2102,7 @@ class LogicSegmenter:
             features.append("furniture_detection")
         if self.config.ENABLE_DEHYPHENATION:
             features.append("dehyphenation")
+        features.append("reference_detection")  # NEW
         
         # Calculate stats and include corrector stats
         processing_stats = self._calculate_stats(chunks)
@@ -2254,6 +2573,14 @@ class LogicSegmenter:
         if chunk_type is None:
             chunk_type = self._infer_chunk_type(segments, tags, sentences)
         
+        # Detect references to Figure/Table/Equation (NEW)
+        references = []
+        if self.block_catalog and full_text:
+            chunk_page = page_range[0] if page_range else 0
+            references = self.reference_detector.detect_references(
+                full_text, chunk_page, self.block_catalog
+            )
+        
         return EnrichedChunk(
             chunk_id=chunk_id,
             heading_path=heading_path,
@@ -2265,7 +2592,8 @@ class LogicSegmenter:
             source_segments=source_ids,
             page_range=page_range,
             depth=depth,
-            word_count=word_count
+            word_count=word_count,
+            references=references  # NEW
         )
     
     def _infer_chunk_type(self, segments: List[Dict], tags: List[str], 
