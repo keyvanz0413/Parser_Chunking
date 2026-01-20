@@ -1,18 +1,20 @@
-# Parser_Chunking Project Dependencies
-# =====================================
+# Synapta Parser & Chunking Pipeline Dependencies
+# ==================================================
 
-# Core PDF parsing
-docling>=2.0.0
+# Core PDF Parsing
+docling>=2.4.0
 
-# NLP processing
+# NLP and Linguistic Analysis
 spacy>=3.7.0
 
-# Data processing (standard library modules used, but these are common utilities)
-# json, re, logging, pathlib - built-in, no installation needed
+# Utilities
+pathlib
+typing-extensions
 
-# SpaCy model setup (run after installing spacy):
-# python -m spacy download en_core_web_md
-
-# Optional: For metadata extraction (if using PDFMetadataExtractor)
-# google-cloud-vision>=3.0.0
-# requests>=2.28.0
+# Installation Instructions:
+# -------------------------
+# 1. Install dependencies:
+#    pip install -r requirements.txt
+#
+# 2. Download specific NLP model:
+#    python -m spacy download en_core_web_md
