@@ -1419,6 +1419,34 @@ class POSAnalyzer:
         # Compile patterns for efficiency
         self._evidence_patterns = [re.compile(p, re.IGNORECASE) for p in self.EVIDENCE_PATTERNS]
         self._short_exceptions = [re.compile(p, re.IGNORECASE) for p in self.SHORT_SENTENCE_EXCEPTIONS]
+
+        # NEW: Contextual Transition Logic (Pattern Detection)
+        # Defines roles that are likely to follow a specific role
+        self.EXPECTED_SEQUENCES = {
+            'topic': ['explanation', 'definition', 'procedure', 'question'],
+            'definition': ['explanation', 'interpretation', 'example'],
+            'example': ['explanation', 'evidence', 'formula', 'interpretation'],
+            'evidence': ['interpretation', 'conclusion', 'comparison'],
+            'procedure': ['procedure', 'example', 'caution'],
+            'assumption': ['formula', 'mechanism', 'procedure'],
+            'question': ['explanation', 'topic', 'procedure'],
+        }
+
+        # NEW: Negative rules to catch false positives in context
+        self.NEGATIVE_CONTEXT_RULES = {
+            'example': [r'^\s*the\s+following\b', r'^\s*note\s+that\b'], 
+            'definition': [r'\bin\s+this\s+case\b', r'\bfor\s+example\b'],
+            'formula': [
+                r'\b\d+[- ](?:year|month|day|week|page|edition|class)\b', # Descriptions: "10-year", "3rd edition"
+                r'\b(?:pp\.|pages?)\s+\d+\b',                           # Page references
+                r'\b(?:19|20)\d{2}\b',                                  # Years (1990, 2021)
+                r'^[A-Z]\.\s'                                           # List markers like "A. "
+            ],
+            'mechanism': [
+                r'^(?:therefore|thus|hence|consequently)\b',            # Likely a conclusion instead
+                r'\b(?:see|refer\s+to|illustrated\s+in)\b'              # Likely a reference
+            ],
+        }
     
     def analyze_sentences(self, text: str, heading_path: str = "") -> List[Dict[str, Any]]:
         """
@@ -1477,13 +1505,16 @@ class POSAnalyzer:
             form = self._detect_form(sent_text, pos_tags, is_imperative)
             
             # Determine role/function with enhanced context
+            prev_role = sentences[-1]["role"] if sentences else None
+            
             role = self._determine_role(
                 sent_text, i, pos_tags, is_imperative,
                 heading_hint=heading_hint,
                 relative_pos=relative_pos,
                 is_first=(i == 0),
                 is_last=(i == total_sentences - 1),
-                form=form  # Pass form for role adjustment
+                form=form,
+                prev_role=prev_role  # NEW: Pass context
             )
             
             sentences.append({
@@ -1569,21 +1600,24 @@ class POSAnalyzer:
     def _determine_role(self, text: str, position: int, pos_tags: List[str], 
                         is_imperative: bool, heading_hint: Optional[str] = None,
                         relative_pos: float = 0.5, is_first: bool = False,
-                        is_last: bool = False, form: str = "declarative") -> str:
+                        is_last: bool = False, form: str = "declarative",
+                        prev_role: Optional[str] = None) -> str:
         """
         Determine sentence role/function with enhanced context awareness.
         
         Enhanced with:
+        - Pattern Recognition: Uses prev_role to boost/penalize candidate roles
         - Form-aware role detection (interrogative -> question)
         - Evidence detection (statistics, percentages, trends)
         - Heading context (chapter/section hints)
         - Sentence position (first/last/relative)
         - Short sentence exception handling
-        
-        Priority order ensures most specific roles are checked first.
         """
         text_lower = text.lower()
         text_stripped = text.strip()
+        
+        # 1. INITIAL CANDIDATE DETECTION (Rule-based)
+        candidate_role = "explanation"
         
         # ============ QUESTION (interrogative form) ============
         # Detect questions first - they have clear syntactic marker
@@ -1667,30 +1701,46 @@ class POSAnalyzer:
             return "example"
         
         # ============ CONCLUSION ============
-        # Check explicit conclusion markers
+        # Check explicit conclusion markers FIRST to prevent misclassification as mechanism
         if re.search(r"\b(therefore|thus|hence|in\s+conclusion|as\s+a\s+result|consequently|overall)\b", text_lower):
-            return "conclusion"
+            candidate_role = "conclusion"
         # Position-based hint: last sentence with conclusion-like structure
-        if is_last and re.search(r"\b(summary|overall|ultimately)\b", text_lower):
-            return "conclusion"
+        elif is_last and re.search(r"\b(summary|overall|ultimately)\b", text_lower):
+            candidate_role = "conclusion"
+        
+        # ============ MECHANISM (Only if not already a conclusion) ============
+        elif candidate_role == "explanation":
+            if re.search(r"\b(mechanism|process|works?\s+by|functions?\s+by|how\s+\w+\s+works?)\b", text_lower):
+                candidate_role = "mechanism"
         
         # ============ TOPIC (first sentence with verb) ============
-        if is_first and "VERB" in pos_tags:
-            return "topic"
+        if candidate_role == "explanation" and is_first and "VERB" in pos_tags:
+            candidate_role = "topic"
         
-        # ============ HEADING CONTEXT HINT ============
-        # Use heading hint as fallback before defaulting to explanation
-        if heading_hint:
-            # Only apply if no stronger signal was found
-            return heading_hint
+        # 2. CONTEXTUAL REFINEMENT (The "Voice Message" Solution)
+        # Logic: If current candidate is vague (explanation) but follow a strong trigger role
+        if candidate_role == "explanation" and prev_role in self.EXPECTED_SEQUENCES:
+            # If after an example, we see something procedural, it's likely still part of the example mechanism
+            if prev_role == "example" and is_imperative:
+                candidate_role = "procedure" # Part of example steps
+            
+            # If after a definition, we see a descriptive sentence, boost its importance
+            if prev_role == "definition" and relative_pos < 0.4:
+                # Keep as explanation but this is a high-confidence one
+                pass
+
+        # 3. NEGATIVE CONTEXT FILTERING (Reducing False Positives)
+        if candidate_role in self.NEGATIVE_CONTEXT_RULES:
+            for pattern in self.NEGATIVE_CONTEXT_RULES[candidate_role]:
+                if re.search(pattern, text_lower):
+                    candidate_role = "explanation" # Downgrade if it matches noise patterns
+                    break
+
+        # ============ HEADING CONTEXT HINT (Fallback) ============
+        if candidate_role == "explanation" and heading_hint:
+            candidate_role = heading_hint
         
-        # ============ POSITION-BASED HINTS ============
-        # Opening sentences in a paragraph more likely to be topic
-        if relative_pos < 0.15 and "VERB" in pos_tags:
-            return "topic"
-        
-        # ============ DEFAULT ============
-        return "explanation"
+        return candidate_role
     
     def get_last_n_sentences(self, text: str, n: int = 2) -> str:
         """Extract the last N sentences from text for overlap."""
