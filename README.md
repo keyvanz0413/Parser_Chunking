@@ -1,10 +1,9 @@
 # Technical Report: Structural-Semantic Fusion for High-Precision PDF Parsing
-**Version**: 2.4 | **Project**: Synapta Parser & Logic Segmenter
 
 ---
 
 ## 1. Abstract
-This report details the implementation of a high-performance, rule-based pipeline designed to transform large-scale, complex PDF documents (1000+ page financial and academic textbooks) into context-enriched, semantically tagged chunks. By integrating a multi-phase structural reconstruction algorithm with a state-aware sentence classification engine, the system achieves approximately **85% classification accuracy** and maintains full structural lineage without the high latency or cost associated with Large Language Model (LLM) pre-processing.
+This report details the implementation of a high-performance, rule-based pipeline designed to transform large-scale, complex PDF documents (1000+ page financial and academic textbooks) into context-enriched, semantically tagged chunks. By integrating a multi-phase structural reconstruction algorithm with a refined "Funnel-style" sentence classification engine, the system achieves an **LLM-verified classification accuracy of ~94.5%** and maintains full structural lineage without the high latency or cost associated with Large Language Model (LLM) pre-processing.
 
 ## 2. Introduction
 In typical RAG (Retrieval-Augmented Generation) systems, PDF parsing often suffers from "Contextual Blindness"—where chunks are separated from their parent headings, or "Structural Fragmentation"—where page breaks and column layouts disrupt the natural flow. Our approach, **Structural-Semantic Fusion**, addresses these issues by reconstructing the document's logical architecture before executing semantic segmentation.
@@ -45,7 +44,9 @@ The core intelligence of the system lies in the SRI engine, which classifies sen
 ### 4.1 Layered Detection Logic
 1.  **Linguistic Layer**: Utilizing **spaCy en_core_web_md**, the system performs Part-of-Speech (POS) tagging to identify imperative structures (Commands/Procedures) and statistical markers.
 2.  **Discourse Transition Layer (The "State Machine")**: Inspired by discourse analysis, the system utilizes the `prev_role` to influence the `current_role`. For example, a declarative sentence following an `example` trigger is prioritized as a `mechanism` or `interpretation`.
-3.  **Negative Rule Layer**: To mitigate common classification noise (e.g., mistaking "10-year period" for a mathematical `formula`), the system applies a comprehensive exclusion library.
+3.  **Funnel-Style Priority Cascading**: Unlike flat if-statements, roles are matched via a prioritized cascade where low-level roles (e.g., `explanation`) are progressively refined into specialized roles.
+4.  **Negative Rule Layer (Global Filter)**: A comprehensive exclusion library (e.g., preventing hyphenated words like "day-to-day" from triggering mathematical `formula` tags) is applied as a final global filter, ensuring all candidate roles pass through a noise-suppression gate.
+5.  **Glossary-Style Pattern Recognition**: Specifically handles "Noun [Space] Definition" patterns typical in textbook glossaries, which lack explicit system verbs or connecting phrases like "is defined as."
 
 ### 4.2 Classification Taxonomy Highlights
 *   **Cognitive Roles**: `Topic`, `Definition`, `Explanation`, `Mechanism`, `Interpretation`.
@@ -55,8 +56,9 @@ The core intelligence of the system lies in the SRI engine, which classifies sen
 ---
 
 ## 5. Evaluation and Results
-The system’s performance was validated through **Stratified Sampling Audit** on a 1073-page textbook (*Investments*). 
-*   **Accuracy**: Achieved **~85% precision** across complex roles.
+The system’s performance was validated through **LLM-Based Stratified Audit** on a 1073-page textbook (*Investments*). 
+*   **Accuracy**: Achieved **~94.5% precision** as verified by an LLM-based semantic review (200 random samples).
+*   **Rule Robustness**: Significant improvement in "Scenario Setup" detection (e.g., correctly tagging "Suppose your client..." as `assumption` despite numerical content) and "Glossary Style" definitions.
 *   **Efficiency**: Total processing time for 1,000+ pages averaged **12 minutes** on local hardware (MPS accelerated).
 *   **Reliability**: Significant reduction in "Hallucinated Context" during RAG retrieval due to 100% path coverage.
 

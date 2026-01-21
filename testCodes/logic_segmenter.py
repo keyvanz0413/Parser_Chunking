@@ -1444,8 +1444,18 @@ class POSAnalyzer:
             ],
             'mechanism': [
                 r'^(?:therefore|thus|hence|consequently)\b',            # Likely a conclusion instead
-                r'\b(?:see|refer\s+to|illustrated\s+in)\b'              # Likely a reference
+                r'\b(?:see|refer\s+to|illustrated\s+in)\b',             # Likely a reference
+                r'\bthe\s+(?:lesson|summary|takeaway)\b'                # Conclusion marker
             ],
+            'conclusion': [
+                r'\bfor\s+example\b',                                   # Example inside summary
+                r'\bif\s+we\s+assume\b'                                 # Assumption inside summary
+            ],
+            'topic': [
+                r'\b(?:http|www|mhhe|com\b)',                           # URLs/Websites
+                r'^(?:because|although|since|whereas|while|if)\b',      # Subordinating conjunctions (unlikely topics)
+                r'\b(?:all\s+rights\s+reserved|copyright)\b'            # Boilerplate
+            ]
         }
     
     def analyze_sentences(self, text: str, heading_path: str = "") -> List[Dict[str, Any]]:
@@ -1620,123 +1630,132 @@ class POSAnalyzer:
         candidate_role = "explanation"
         
         # ============ QUESTION (interrogative form) ============
-        # Detect questions first - they have clear syntactic marker
         if form == "interrogative":
-            # Check if it's a rhetorical question introducing a topic
-            if is_first or relative_pos < 0.2:
-                return "question"  # Could also be "topic", but question is more accurate
-            return "question"
+            candidate_role = "question"
         
         # ============ IRRELEVANT (with exceptions) ============
-        if len(text_stripped) < 15:
-            # Check exceptions before marking as irrelevant
+        if candidate_role == "explanation" and len(text_stripped) < 15:
             has_exception = any(p.search(text) for p in self._short_exceptions)
             if not has_exception:
-                return "irrelevant"
-            # If exception found, continue to other rules
+                candidate_role = "irrelevant"
         
-        # Boilerplate patterns (always irrelevant)
-        if re.search(r"^\s*(see\s+(?:also|below|above)|page\s+\d+|continued|ibid)\s*$", text_lower):
-            return "irrelevant"
+        # Boilerplate / Navigation / URLs (High priority for irrelevant)
+        if candidate_role == "explanation" or candidate_role == "topic":
+            if re.search(r"^\s*(see\s+(?:also|below|above)|page\s+\d+|continued|ibid)\s*$", text_lower):
+                candidate_role = "irrelevant"
+            elif re.search(r"\b(?:http|www|mhhe|com\b)", text_lower):
+                candidate_role = "irrelevant"
+            elif re.search(r"\b(?:all\s+rights\s+reserved|copyright)\b", text_lower):
+                candidate_role = "irrelevant"
+            
+        # ============ REFERENCE (Check before procedure to catch "Note Table 1") ============
+        if candidate_role == "explanation":
+            if re.search(r"\b(figure|table|exhibit|chart|appendix|spreadsheet|column|row)\s+\d", text_lower):
+                candidate_role = "reference"
+            elif re.search(r"(?:as\s+)?(?:shown|illustrated|presented|discussed|referenced)\s+in", text_lower):
+                candidate_role = "reference"
         
-        # ============ PROCEDURE (imperative + step patterns) ============
-        if is_imperative:
-            return "procedure"
-        if re.search(r"\b(step\s+\d|first|second|third|finally)\b", text_lower):
-            return "procedure"
-        
-        # ============ EVIDENCE (NEW - data-driven sentences) ============
-        # Check evidence patterns - this should come before formula
-        if any(p.search(text) for p in self._evidence_patterns):
-            return "evidence"
-        
-        # ============ DEFINITION ============
-        if re.search(r"\bis\s+(defined\s+as|a\s+\w+\s+that)\b", text_lower):
-            return "definition"
-        if re.search(r"\brefers?\s+to\b|\bmeans?\s+that\b", text_lower):
-            return "definition"
-        
-        # ============ FORMULA ============
-        if re.search(r"[=+\-*/^].*[=+\-*/^]", text):
-            return "formula"
-        if re.search(r"\bequation\b|\bformula\b|\bwhere\s+\w+\s*=", text_lower):
-            return "formula"
-        
-        # ============ REFERENCE (Figure/Table references) ============
-        if re.search(r"\b(figure|table|exhibit|chart)\s+\d", text_lower):
-            return "reference"
-        if re.search(r"(?:as\s+)?(?:shown|illustrated|presented)\s+in", text_lower):
-            return "reference"
-        
-        # ============ MECHANISM ============
-        if re.search(r"\b(mechanism|process|works?\s+by|functions?\s+by|how\s+\w+\s+works?)\b", text_lower):
-            return "mechanism"
-        
-        # ============ INTERPRETATION ============
-        if re.search(r"\b(this\s+(?:means|implies|suggests)|interpret|in\s+other\s+words)\b", text_lower):
-            return "interpretation"
-        
-        # ============ LIMITATION ============
-        if re.search(r"\b(limitation|constraint|caveat|does\s+not\s+(?:apply|work)|only\s+works?\s+(?:when|if))\b", text_lower):
-            return "limitation"
-        
-        # ============ COMPARISON ============
-        if re.search(r"\b(compar|contrast|unlike|whereas|similar|differ)\b", text_lower):
-            return "comparison"
-        if re.search(r"\b(more|less|greater|smaller)\s+than\b", text_lower):
-            return "comparison"
-        
-        # ============ ASSUMPTION ============
-        if re.search(r"\b(assume|assuming|given\s+that|suppose|provided\s+that)\b", text_lower):
-            return "assumption"
-        if re.search(r"^(?:If|When|Suppose|Assume|Given)\b", text):
-            return "assumption"
-        
-        # ============ APPLICATION ============
-        if re.search(r"\b(in\s+practice|applies?\s+to|used\s+(?:in|for)|practical|real-world)\b", text_lower):
-            return "application"
-        
-        # ============ EXAMPLE ============
-        if re.search(r"\b(for\s+example|for\s+instance|such\s+as|consider\s+the|e\.g\.)\b", text_lower):
-            return "example"
-        
+        # ============ ASSUMPTION (Scenario Setup - Prioritized over evidence/procedure) ============
+        if candidate_role == "explanation" or candidate_role == "reference":
+            if re.search(r"\b(assume|assuming|given\s+that|suppose|provided\s+that|let\s+\w+\s+be)\b", text_lower):
+                candidate_role = "assumption"
+            elif re.search(r"^(?:If|When|Suppose|Assume|Given|Let)\b", text):
+                candidate_role = "assumption"
+
         # ============ CONCLUSION ============
-        # Check explicit conclusion markers FIRST to prevent misclassification as mechanism
-        if re.search(r"\b(therefore|thus|hence|in\s+conclusion|as\s+a\s+result|consequently|overall)\b", text_lower):
-            candidate_role = "conclusion"
-        # Position-based hint: last sentence with conclusion-like structure
-        elif is_last and re.search(r"\b(summary|overall|ultimately)\b", text_lower):
-            candidate_role = "conclusion"
-        
-        # ============ MECHANISM (Only if not already a conclusion) ============
-        elif candidate_role == "explanation":
+        if candidate_role == "explanation" or candidate_role == "assumption":
+            if re.search(r"\b(therefore|thus|hence|in\s+conclusion|as\s+a\s+result|consequently|overall|ultimately|in\s+short|the\s+lesson|takeaway|the\s+result\s+is)\b", text_lower):
+                candidate_role = "conclusion"
+            elif is_last and re.search(r"\b(summary|overall|ultimately|finally)\b", text_lower):
+                candidate_role = "conclusion"
+
+        # ============ COMPARISON ============
+        if candidate_role == "explanation":
+            if re.search(r"\b(compar|contrast|unlike|whereas|similar|differ|versus|vs\.)\b", text_lower):
+                candidate_role = "comparison"
+            elif re.search(r"^(?:Unlike|Whereas|Similarly|In\s+contrast)\b", text):
+                candidate_role = "comparison"
+            elif re.search(r"\b(more|less|greater|smaller|higher|lower)\s+than\b", text_lower):
+                candidate_role = "comparison"
+
+        # ============ EVIDENCE (Data-driven) ============
+        if candidate_role == "explanation":
+             if any(p.search(text) for p in self._evidence_patterns):
+                candidate_role = "evidence"
+
+        # ============ PROCEDURE (Imperative/Steps) ============
+        if candidate_role == "explanation":
+            if is_imperative or re.search(r"^(first|second|third|finally|next|then),?\s", text_lower):
+                candidate_role = "procedure"
+            elif re.search(r"\b(step\s+\d+|algorithm|methodology)\b", text_lower):
+                candidate_role = "procedure"
+
+        # ============ DEFINITION ============
+        if candidate_role == "explanation":
+            if re.search(r"\bis\s+(defined\s+as|a\s+\w+\s+that)\b", text_lower):
+                candidate_role = "definition"
+            elif re.search(r"\brefers?\s+to\b|\bmeans?\s+that\b", text_lower):
+                candidate_role = "definition"
+            # Glossary style: "Term [Space] A description starting with capital/article"
+            elif re.search(r"^[a-zA-Z][\w\s-]{1,30}\s+(?:A|An|The|Is|Process|Measure|Ratio|Method)\b", text):
+                candidate_role = "definition"
+
+        # ============ FORMULA ============
+        if candidate_role == "explanation" or candidate_role == "evidence":
+            # Strengthened regex: must have operators with spaces or math-like density
+            # Avoiding hyphens in words like 'day-to-day' by requiring one of [=+\*/^] or spacing
+            if re.search(r"[=+\*/^].*[=+\-*/^]|[\d\s][+\-*/][\d\s].*[\d\s][+\-*/][\d\s]|[A-Z]\s*=\s*[A-Z\d]", text):
+                candidate_role = "formula"
+            elif re.search(r"\bequation\b|\bformula\b|\bwhere\s+\w+\s*=", text_lower):
+                candidate_role = "formula"
+
+
+        # ============ INTERPRETATION ============
+        if candidate_role == "explanation":
+            if re.search(r"\b(this\s+(?:means|implies|suggests)|interpret|in\s+other\s+words|effectively)\b", text_lower):
+                candidate_role = "interpretation"
+
+        # ============ MECHANISM ============
+        if candidate_role == "explanation":
             if re.search(r"\b(mechanism|process|works?\s+by|functions?\s+by|how\s+\w+\s+works?)\b", text_lower):
                 candidate_role = "mechanism"
+
+        # ============ LIMITATION ============
+        if candidate_role == "explanation":
+            if re.search(r"\b(limitation|constraint|caveat|does\s+not\s+(?:apply|work)|only\s+works?\s+(?:when|if))\b", text_lower):
+                candidate_role = "limitation"
         
-        # ============ TOPIC (first sentence with verb) ============
+        # ============ APPLICATION ============
+        if candidate_role == "explanation":
+            if re.search(r"\b(in\s+practice|applies?\s+to|used\s+(?:in|for)|practical|real-world)\b", text_lower):
+                candidate_role = "application"
+        
+        # ============ EXAMPLE ============
+        if candidate_role == "explanation":
+            if re.search(r"\b(for\s+example|for\s+instance|such\s+as|consider\s+the|e\.g\.)\b", text_lower):
+                candidate_role = "example"
+        
+        # ============ TOPIC (First sentence boost - Refined) ============
         if candidate_role == "explanation" and is_first and "VERB" in pos_tags:
-            candidate_role = "topic"
+            # Topics should be relatively compact and not start with complex conjunctions
+            word_count = len(text_stripped.split())
+            if word_count < 15 and not re.search(r"^(?:Because|Since|Although|While|If|Whereas)\b", text):
+                 candidate_role = "topic"
         
-        # 2. CONTEXTUAL REFINEMENT (The "Voice Message" Solution)
+        # 2. CONTEXTUAL REFINEMENT
         # Logic: If current candidate is vague (explanation) but follow a strong trigger role
         if candidate_role == "explanation" and prev_role in self.EXPECTED_SEQUENCES:
-            # If after an example, we see something procedural, it's likely still part of the example mechanism
             if prev_role == "example" and is_imperative:
-                candidate_role = "procedure" # Part of example steps
+                candidate_role = "procedure" 
             
-            # If after a definition, we see a descriptive sentence, boost its importance
-            if prev_role == "definition" and relative_pos < 0.4:
-                # Keep as explanation but this is a high-confidence one
-                pass
-
-        # 3. NEGATIVE CONTEXT FILTERING (Reducing False Positives)
+        # 3. NEGATIVE CONTEXT FILTERING (Always apply to all roles)
         if candidate_role in self.NEGATIVE_CONTEXT_RULES:
             for pattern in self.NEGATIVE_CONTEXT_RULES[candidate_role]:
                 if re.search(pattern, text_lower):
-                    candidate_role = "explanation" # Downgrade if it matches noise patterns
+                    candidate_role = "explanation" 
                     break
 
-        # ============ HEADING CONTEXT HINT (Fallback) ============
+        # ============ HEADING CONTEXT FALLBACK ============
         if candidate_role == "explanation" and heading_hint:
             candidate_role = heading_hint
         
