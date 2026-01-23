@@ -1,8 +1,8 @@
 """
-Logic Segmenter Module v2.4 (Enhanced Furniture Detection)
+Logic Segmenter Module (Enhanced Furniture Detection)
 
 Processes flat_segments from parser_docling.py and applies:
-1. Furniture Detection (NEW v2.4) - Multi-feature page decoration detection
+1. Furniture Detection - Multi-feature page decoration detection
 2. Reading Order Correction - Column-aware segment reordering for multi-column layouts
 3. Heading Path Reconstruction - Stack-based hierarchy rebuilding with backfilling
 4. POS Tagging (via spaCy) - Sentence role identification with Imperative detection
@@ -12,7 +12,7 @@ Processes flat_segments from parser_docling.py and applies:
 8. Token-based Length Control - Prevents extreme chunk sizes
 9. Cross-Page Continuation Detection - Hyphenation, open clause, fragment detection, dehyphenation
 
-v2.4 Improvements:
+Improvements:
 - FurnitureDetector: Position-band + frequency + multi-feature classification
 - Dehyphenation: Cross-page hyphen repair with word validation
 - Enhanced column detection with projection profile analysis
@@ -68,7 +68,7 @@ class ChunkingConfig:
     CONTINUATION_COLUMN_STRICT = True     # Require same column for continuation
     
     # Pipeline Phase settings
-    ENABLE_FURNITURE_DETECTION = True     # Pre-Phase: Furniture detection (NEW v2.4)
+    ENABLE_FURNITURE_DETECTION = True     # Pre-Phase: Furniture detection
     ENABLE_READING_ORDER_CORRECTION = True   # Phase 1: Column-based reordering
     ENABLE_HEADING_RECONSTRUCTION = True     # Phase 2: Stack-based hierarchy rebuild
     ENABLE_BACKFILL_CORRECTION = True        # Phase 3: Same-page L1 backfilling
@@ -78,20 +78,20 @@ class ChunkingConfig:
     PAGE_WIDTH_DEFAULT = 612.0               # Default PDF page width (8.5" × 72dpi)
     PAGE_HEIGHT_DEFAULT = 792.0              # Default PDF page height (11" × 72dpi)
     
-    # Furniture detection settings (NEW v2.4)
+    # Furniture detection settings
     FURNITURE_TOP_BAND = 0.10                # Page top 10% considered edge zone
     FURNITURE_BOTTOM_BAND = 0.10             # Page bottom 10% considered edge zone
     FURNITURE_REPEAT_THRESHOLD = 0.20        # String appearing on 20%+ pages is "repeated"
     FURNITURE_MAX_WORDS = 5                  # Short text threshold for furniture
     FURNITURE_MIN_PAGES_FOR_STATS = 10       # Minimum pages to compute frequency stats
     
-    # Dehyphenation settings (NEW v2.4)
+    # Dehyphenation settings
     ENABLE_DEHYPHENATION = True              # Enable cross-page hyphen repair
 
 
 
 # =============================================================================
-# Data Models (Schema for Sunday Deliverable)
+# Data Models
 # =============================================================================
 
 @dataclass
@@ -122,7 +122,7 @@ class Reference:
 @dataclass
 class EnrichedChunk:
     """
-    Core Schema v2.2 - The standardized output format with references support.
+    Core Schema - The standardized output format with references support.
     
     Fields:
     - chunk_id: Unique identifier
@@ -166,11 +166,11 @@ class EnrichedChunk:
     
 
 # =============================================================================
-# Three-Phase Pipeline Processor (NEW v2.3)
+# Three-Phase Pipeline Processor
 # =============================================================================
 
 # =============================================================================
-# Furniture Detector (NEW v2.4)
+# Furniture Detector
 # =============================================================================
 
 class FurnitureDetector:
@@ -372,7 +372,7 @@ class FurnitureDetector:
 
 
 # =============================================================================
-# Dehyphenation Helper (NEW v2.4)
+# Dehyphenation Helper
 # =============================================================================
 
 class DehyphenationHelper:
@@ -536,7 +536,255 @@ class DehyphenationHelper:
 
 
 # =============================================================================
-# Reference Detector (NEW)
+# Caption Bonding Helper (Atomic Unit Bonding)
+# =============================================================================
+
+class CaptionBondingHelper:
+    """
+    Detects and bonds Table/Figure captions with their structural blocks.
+    
+    Solves three subproblems:
+    1. Over-fragmentation: Prevents splitting caption + table + notes into separate chunks
+    2. Side-caption detection: Identifies captions in non-standard positions (side/bottom)
+    3. Metadata drift: Distinguishes block captions from structural headers
+    
+    Caption Types:
+    - Block Caption: "Table 1.1", "Figure 2.3" - should NOT update global heading stack
+    - Structural Header: "Chapter 1", "1.1 Introduction" - SHOULD update heading stack
+    
+    Usage:
+        helper = CaptionBondingHelper()
+        is_caption, caption_info = helper.detect_caption(segment)
+        if is_caption:
+            # Bond with next Table/Figure block
+    """
+    
+    # Patterns for block captions (Table/Figure/Exhibit/Equation)
+    BLOCK_CAPTION_PATTERNS = [
+        r'^(?:Table|Tbl\.?)\s*(\d+(?:\.\d+)?)',
+        r'^(?:Figure|Fig\.?)\s*(\d+(?:\.\d+)?(?:\s*\([a-z]\))?)',
+        r'^(?:Exhibit)\s*(\d+(?:\.\d+)?)',
+        r'^(?:Equation|Eq\.?)\s*\(?\s*(\d+(?:\.\d+)?)\s*\)?',
+        r'^(?:Formula)\s*\(?\s*(\d+(?:\.\d+)?)\s*\)?',
+        r'^(?:Chart|Graph|Diagram)\s*(\d+(?:\.\d+)?)',
+    ]
+    
+    # Patterns for structural headers (should update heading stack)
+    STRUCTURAL_HEADER_PATTERNS = [
+        r'^(?:Chapter|Part|Section|Unit)\s+\d+',
+        r'^\d+(?:\.\d+)*\s+[A-Z]',  # "1.1 Introduction"
+        r'^(?:Appendix|Glossary|Index|Bibliography|References)',
+        r'^(?:Summary|Conclusion|Introduction|Overview|Preface)',
+    ]
+    
+    def __init__(self, config: ChunkingConfig = None):
+        self.config = config or ChunkingConfig()
+        self._caption_patterns = [re.compile(p, re.IGNORECASE) for p in self.BLOCK_CAPTION_PATTERNS]
+        self._structural_patterns = [re.compile(p, re.IGNORECASE) for p in self.STRUCTURAL_HEADER_PATTERNS]
+        self._stats = {
+            "captions_detected": 0,
+            "captions_bonded": 0,
+            "side_captions_detected": 0,
+        }
+    
+    def detect_caption(self, seg: Dict) -> Tuple[bool, Dict[str, Any]]:
+        """
+        Detect if a segment is a block caption (Table/Figure title).
+        
+        Distinguishes between:
+        - True captions: "Figure 3.7 The biggest stock markets" (short, title-like)
+        - Descriptive references: "Figure 3.7 shows the market..." (long, contains verbs)
+        
+        Returns:
+            Tuple of (is_block_caption, caption_info)
+            - is_block_caption: True if this is a Table/Figure caption
+            - caption_info: Dict with caption_type, caption_id, target_type
+        """
+        text = seg.get('text', '').strip()
+        if not text:
+            return False, {}
+        
+        # Check against block caption patterns
+        for pattern in self._caption_patterns:
+            match = pattern.match(text)
+            if match:
+                caption_id = match.group(1)
+                
+                # Filter out descriptive sentences that reference figures but aren't captions
+                # True captions are typically:
+                # 1. Short (under 100 chars for first sentence)
+                # 2. Don't contain common descriptive verbs right after the figure number
+                first_sentence = text.split('.')[0] if '.' in text else text
+                text_after_id = text[match.end():].strip().lower()
+                
+                # Check for descriptive verb patterns (not a caption)
+                # True captions never start with verbs like "shows", "presents", etc.
+                descriptive_verbs = ['shows', 'presents', 'displays', 'illustrates', 
+                                    'depicts', 'demonstrates', 'provides', 'contains',
+                                    'compares', 'summarizes', 'lists', 'is a', 'is the',
+                                    'plots', 'graphs', 'charts', 'traces', 'reports',
+                                    'is an', 'was', 'were', 'has', 'have', 'gives',
+                                    'indicates', 'reveals', 'suggests', 'confirms']
+                is_descriptive = any(text_after_id.startswith(verb) for verb in descriptive_verbs)
+                
+                # If it starts with a descriptive verb, it's a reference sentence, not a caption
+                if is_descriptive:
+                    continue  # Skip this pattern, not a true caption
+                
+                # Infer target type from pattern
+                target_type = self._infer_target_type(text)
+                
+                self._stats["captions_detected"] += 1
+                
+                return True, {
+                    "is_block_caption": True,
+                    "caption_id": caption_id,
+                    "caption_text": text,
+                    "target_type": target_type,
+                    "full_caption_id": f"{target_type} {caption_id}",
+                }
+        
+        return False, {}
+    
+    def is_structural_header(self, seg: Dict) -> bool:
+        """
+        Check if a segment is a structural header (should update heading stack).
+        
+        Structural headers define document hierarchy.
+        Block captions (Table 1.1) should NOT be treated as structural headers.
+        """
+        text = seg.get('text', '').strip()
+        if not text:
+            return False
+        
+        # First check if it's a block caption - those are NOT structural
+        is_caption, _ = self.detect_caption(seg)
+        if is_caption:
+            return False
+        
+        # Check structural patterns
+        for pattern in self._structural_patterns:
+            if pattern.match(text):
+                return True
+        
+        # Fallback: if it's a Header type and not a caption, it's structural
+        if seg.get('type') == 'Header':
+            return True
+        
+        return False
+    
+    def _infer_target_type(self, text: str) -> str:
+        """Infer the target block type from caption text."""
+        text_lower = text.lower()
+        if text_lower.startswith(('table', 'tbl')):
+            return "Table"
+        elif text_lower.startswith(('figure', 'fig', 'chart', 'graph', 'diagram')):
+            return "Figure"
+        elif text_lower.startswith('exhibit'):
+            return "Exhibit"
+        elif text_lower.startswith(('equation', 'eq', 'formula')):
+            return "Equation"
+        return "Figure"  # Default
+    
+    def find_nearby_caption(self, segments: List[Dict], table_index: int, 
+                           max_distance: int = 3) -> Optional[int]:
+        """
+        Find a caption segment near a Table/Figure block.
+        
+        Searches both before and after the table for potential captions.
+        Useful for side-caption and bottom-caption detection.
+        
+        Args:
+            segments: List of all segments
+            table_index: Index of the Table/Figure segment
+            max_distance: Maximum segments to search in each direction
+            
+        Returns:
+            Index of the caption segment, or None if not found
+        """
+        table_seg = segments[table_index]
+        table_page = table_seg.get('page', 0)
+        table_bbox = table_seg.get('bbox', [])
+        
+        # Search before the table
+        for i in range(table_index - 1, max(0, table_index - max_distance) - 1, -1):
+            seg = segments[i]
+            # Must be on same page
+            if seg.get('page', 0) != table_page:
+                continue
+            # Skip if already processed as table/figure
+            if seg.get('type') in ['Table', 'Picture', 'Formula']:
+                continue
+            
+            is_caption, _ = self.detect_caption(seg)
+            if is_caption:
+                self._stats["side_captions_detected"] += 1
+                return i
+        
+        # Search after the table (for bottom captions)
+        for i in range(table_index + 1, min(len(segments), table_index + max_distance + 1)):
+            seg = segments[i]
+            if seg.get('page', 0) != table_page:
+                continue
+            if seg.get('type') in ['Table', 'Picture', 'Formula']:
+                continue
+            
+            is_caption, _ = self.detect_caption(seg)
+            if is_caption:
+                self._stats["side_captions_detected"] += 1
+                return i
+        
+        return None
+    
+    def bond_caption_with_block(self, caption_seg: Dict, block_seg: Dict, 
+                                notes_segs: List[Dict] = None) -> Dict:
+        """
+        Create a bonded unit combining caption + block + notes.
+        
+        Returns a merged segment that can be processed as a single chunk.
+        """
+        notes_segs = notes_segs or []
+        
+        # Combine text
+        combined_text = caption_seg.get('text', '').strip()
+        for note in notes_segs:
+            note_text = note.get('text', '').strip()
+            if note_text:
+                combined_text += "\n" + note_text
+        
+        # Merge segment IDs
+        all_seg_ids = [caption_seg.get('segment_id', '')]
+        all_seg_ids.append(block_seg.get('segment_id', ''))
+        for note in notes_segs:
+            all_seg_ids.append(note.get('segment_id', ''))
+        
+        # Determine page range
+        pages = {caption_seg.get('page', 0), block_seg.get('page', 0)}
+        for note in notes_segs:
+            pages.add(note.get('page', 0))
+        
+        self._stats["captions_bonded"] += 1
+        
+        return {
+            "type": block_seg.get('type', 'Table'),
+            "text": combined_text,
+            "segment_id": block_seg.get('segment_id', ''),
+            "bonded_segment_ids": [sid for sid in all_seg_ids if sid],
+            "page": min(pages),
+            "page_range": sorted(pages),
+            "bbox": block_seg.get('bbox', []),
+            "heading_path": caption_seg.get('heading_path', ''),
+            "is_bonded": True,
+            "caption_text": caption_seg.get('text', '').strip(),
+        }
+    
+    def get_stats(self) -> Dict[str, int]:
+        """Return detection statistics."""
+        return self._stats.copy()
+
+
+# =============================================================================
+# Reference Detector
 # =============================================================================
 
 class ReferenceDetector:
@@ -589,7 +837,7 @@ class ReferenceDetector:
     }
     
     # Block types to track
-    BLOCK_TYPES = {'Figure', 'Table', 'Formula', 'Picture', 'Equation'}
+    BLOCK_TYPES = {'Figure', 'Table', 'Formula', 'Picture', 'Equation', 'Header', 'Title', 'Paragraph', 'Text'}
     
     def __init__(self, config: ChunkingConfig = None):
         self.config = config or ChunkingConfig()
@@ -758,11 +1006,18 @@ class ReferenceDetector:
             'Equation': r'^(?:Equation|Eq\.?)\s*\((\d+)\)',
         }
         
-        pattern = patterns.get(block_type)
-        if pattern:
-            match = re.match(pattern, text.strip(), re.IGNORECASE)
-            if match:
-                return self._normalize_caption_id(block_type, match.group(1))
+        # If it's a generic text segment (Header, Paragraph, etc.), try all patterns
+        if block_type in ['Header', 'Title', 'Paragraph', 'Text']:
+            for btype, pattern in patterns.items():
+                match = re.match(pattern, text.strip(), re.IGNORECASE)
+                if match:
+                    return self._normalize_caption_id(btype, match.group(1))
+        else:
+            pattern = patterns.get(block_type)
+            if pattern:
+                match = re.match(pattern, text.strip(), re.IGNORECASE)
+                if match:
+                    return self._normalize_caption_id(block_type, match.group(1))
         
         return None
     
@@ -836,7 +1091,7 @@ class ReadingOrderCorrector:
     - Page decorations (furniture) interfere with content extraction
     
     Pipeline:
-    - Pre-Phase: Furniture detection using FurnitureDetector (NEW v2.4)
+    - Pre-Phase: Furniture detection using FurnitureDetector
     - Phase 1: Column-based segment reordering (left-col then right-col per page)
     - Phase 2: Heading stack reconstruction (ancestor stack algorithm)
     - Phase 3: Same-page backfilling for late-discovered L1 headers
@@ -846,7 +1101,7 @@ class ReadingOrderCorrector:
     
     def __init__(self, config: ChunkingConfig = None):
         self.config = config or ChunkingConfig()
-        self.furniture_detector = FurnitureDetector(config)  # NEW v2.4
+        self.furniture_detector = FurnitureDetector(config)
         self._stats = {
             "furniture_detected": 0,
             "pages_reordered": 0,
@@ -867,7 +1122,7 @@ class ReadingOrderCorrector:
         """
         result = segments
         
-        # Pre-Phase: Furniture Detection (NEW v2.4)
+        # Pre-Phase: Furniture Detection
         if self.config.ENABLE_FURNITURE_DETECTION:
             # First pass: scan document for frequency statistics
             self.furniture_detector.scan_document(result)
@@ -973,7 +1228,7 @@ class ReadingOrderCorrector:
             right_col.sort(key=lambda s: -s.get('bbox', [0, 0, 0, 0])[1])
             spanning.sort(key=lambda s: -s.get('bbox', [0, 0, 0, 0])[1])
             
-            # NEW v2.3: Improved merge strategy for textbook layouts
+            # Improved merge strategy for textbook layouts
             # Instead of "spanning + left + right", we merge by y-position
             # This ensures continuation paragraphs stay in correct reading order
             
@@ -1411,8 +1666,13 @@ class POSAnalyzer:
                 nlp = spacy.load(model_name)
                 logger.info(f"Loaded spaCy model: {model_name}")
             except Exception as e:
-                logger.warning(f"Could not load spaCy model: {e}. POS analysis disabled.")
-                nlp = None
+                error_msg = (
+                    f"CRITICAL ERROR: Could not load spaCy model '{model_name}': {e}. "
+                    f"POS analysis and sentence segmentation will fail. "
+                    f"Please run: python -m spacy download {model_name}"
+                )
+                logger.critical(error_msg)
+                raise RuntimeError(error_msg) from e
         self.nlp = nlp
         self.tag_detector = TagDetector()
         
@@ -1487,7 +1747,7 @@ class POSAnalyzer:
         - irrelevant: Low semantic value
         """
         if self.nlp is None:
-            return [{"text": text.strip(), "role": "explanation", "pos_tags": [], "is_imperative": False}]
+            raise RuntimeError("POSAnalyzer.nlp is None. This should not happen if initialization passed.")
         
         doc = self.nlp(text)
         sentences = []
@@ -1776,12 +2036,12 @@ class POSAnalyzer:
 
 
 # =============================================================================
-# Cross-Page Continuation Detector (Enhanced v2.2)
+# Cross-Page Continuation Detector (Enhanced)
 # =============================================================================
 
 class ContinuationDetector:
     """
-    Enhanced cross-page paragraph continuation detector v2.4.
+    Enhanced cross-page paragraph continuation detector.
     
     Implements the task requirements for accurate cross-page detection:
     - Incomplete sentences (missing terminal punctuation)
@@ -2104,7 +2364,7 @@ class ContinuationDetector:
                                                 "detail": "complete sentence"}
         
         # =====================================================================
-        # Factor 10: STRONG COMBINATION - Incomplete + Lowercase start (NEW v2.3)
+        # Factor 10: STRONG COMBINATION - Incomplete + Lowercase start
         # This is the strongest cross-page continuation signal
         # When prev ends without punctuation AND curr starts lowercase, it's almost
         # certainly a continuation, even if position/column checks fail
@@ -2173,7 +2433,7 @@ class ContinuationDetector:
         """
         Annotate all segments with continuation markers and evidence.
         
-        Enhanced v2.3: Skips noise headers (like "(concluded)") when detecting
+        Enhanced: Skips noise headers (like "(concluded)") when detecting
         cross-page continuations. This allows paragraphs to be correctly merged
         even when page decoration elements appear between them.
         
@@ -2238,9 +2498,9 @@ class LogicSegmenter:
     """
     Main segmenter that processes flat_segments from parser_docling.py.
     
-    Pipeline v2.3 (Three-Phase Architecture):
+    Pipeline (Three-Phase Architecture):
     1. Load segments from JSON
-    2. Apply Three-Phase Correction Pipeline (NEW v2.3):
+    2. Apply Three-Phase Correction Pipeline:
        - Phase 1: Column-based reading order correction
        - Phase 2: Heading stack reconstruction
        - Phase 3: Same-page backfilling for L1 headers
@@ -2259,10 +2519,12 @@ class LogicSegmenter:
         self.pos_analyzer = POSAnalyzer() if use_pos else None
         self.continuation_detector = ContinuationDetector(self.config)
         self.reading_order_corrector = ReadingOrderCorrector(self.config)
-        self.reference_detector = ReferenceDetector(self.config)  # NEW: Reference detection
+        self.reference_detector = ReferenceDetector(self.config)
+        self.caption_bonding_helper = CaptionBondingHelper(self.config)  # Caption bonding
         self.chunk_counter = 0
         self.previous_chunk_text = ""  # For overlap
         self.block_catalog = None  # Will be populated during processing
+        self.structural_heading_path = ""  # Track structural headers separately from block captions
     
     def process_file(self, input_json_path: str, output_path: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -2285,7 +2547,7 @@ class LogicSegmenter:
         
         logger.info(f"Loaded {len(flat_segments)} segments")
         
-        # NEW v2.3: Apply Three-Phase Correction Pipeline
+        # Apply Three-Phase Correction Pipeline
         # This must run BEFORE continuation detection to ensure correct reading order
         if (self.config.ENABLE_READING_ORDER_CORRECTION or 
             self.config.ENABLE_HEADING_RECONSTRUCTION or 
@@ -2338,7 +2600,7 @@ class LogicSegmenter:
                 **metadata,
                 "total_chunks": len(chunks),
                 "total_segments": len(flat_segments),
-                "processing_version": "2.4",
+                "processing_version": "production",
                 "features": features,
                 "processing_stats": processing_stats
             },
@@ -2352,7 +2614,7 @@ class LogicSegmenter:
     
     def _process_segments(self, segments: List[Dict]) -> List[EnrichedChunk]:
         """
-        Core processing logic v2.2:
+        Core processing logic:
         1. Handle cross-page continuations with evidence tracking
         2. Group related segments (lists, procedures)
         3. Create enriched chunks with continuation metadata and evidence
@@ -2371,7 +2633,7 @@ class LogicSegmenter:
             continuation_evidence = seg.get('continuation_evidence', {})
             
             # =================================================================
-            # Rule 0 (v2.2): Cross-page continuation handling with evidence
+            # Rule 0: Cross-page continuation handling with evidence
             # =================================================================
             # If this segment is marked as a continuation, do NOT flush buffer
             # Instead, continue accumulating to preserve paragraph integrity
@@ -2410,21 +2672,34 @@ class LogicSegmenter:
                 continue
             
             # =================================================================
-            # Rule 1: Headers start new chunks (with noise header exception)
+            # Rule 1: Headers - with Caption Bonding logic
             # =================================================================
+            # Distinguish between:
+            # - Block Captions (Table 1.1, Figure 2.3) -> bond with next block, don't update global path
+            # - Structural Headers (Chapter 1, 1.1 Introduction) -> update global path
             if seg_type == 'Header':
                 # Check if this is a noise header (concluded, continued, etc.)
-                # Noise headers should NOT break the continuation chain
                 is_noise = seg.get('is_noise_header', False) or self.continuation_detector._is_noise_header(seg)
                 
                 if is_noise:
-                    # Noise header: add to buffer without flushing
-                    # This preserves cross-page paragraph continuity
                     buffer.append(seg)
                     logger.debug(f"Skipping noise header {seg.get('segment_id')}: {seg.get('text', '')[:30]}")
                     continue
                 
-                # Real header: Flush buffer with cross-page metadata
+                # Check if this is a block caption (Table X.X, Figure X.X)
+                is_block_caption, caption_info = self.caption_bonding_helper.detect_caption(seg)
+                
+                if is_block_caption:
+                    # Block caption: DO NOT flush buffer or update global heading path
+                    # Instead, add to buffer to bond with upcoming Table/Figure
+                    # Mark it for later bonding
+                    seg['is_block_caption'] = True
+                    seg['caption_info'] = caption_info
+                    buffer.append(seg)
+                    logger.debug(f"Block caption detected: {caption_info.get('full_caption_id', '')} - buffering for bonding")
+                    continue
+                
+                # Structural header: flush buffer and update global heading path
                 if buffer:
                     chunk = self._create_chunk(buffer, current_heading_path)
                     chunk.is_cross_page = has_cross_page
@@ -2436,7 +2711,11 @@ class LogicSegmenter:
                     has_cross_page = False
                     continuation_type = "none"
                     merge_evidences = []
+                
+                # Update structural heading path
                 current_heading_path = heading_path
+                self.structural_heading_path = heading_path
+                
                 # Headers themselves become chunks
                 chunks.append(self._create_chunk([seg], heading_path, chunk_type="header"))
                 continue
@@ -2476,21 +2755,100 @@ class LogicSegmenter:
                 merge_evidences = []
             
             # =================================================================
-            # Rule 4: Tables and Pictures are standalone chunks
+            # Rule 4: Tables/Pictures/Formulas - with Caption Bonding
             # =================================================================
+            # Bond buffered block captions + notes with this structural block
             if seg_type in ['Table', 'Picture', 'Formula']:
-                if buffer:
-                    chunk = self._create_chunk(buffer, current_heading_path)
+                # Check if buffer contains a block caption to bond with
+                caption_seg = None
+                notes_segs = []
+                other_segs = []
+                
+                for buffered_seg in buffer:
+                    if buffered_seg.get('is_block_caption'):
+                        caption_seg = buffered_seg
+                    elif buffered_seg.get('type') in ['Header', 'Paragraph', 'Text']:
+                        # Could be notes/description for the table
+                        notes_segs.append(buffered_seg)
+                    else:
+                        other_segs.append(buffered_seg)
+                
+                # First, flush any non-caption content separately
+                if other_segs:
+                    chunk = self._create_chunk(other_segs, current_heading_path)
                     chunk.is_cross_page = has_cross_page
                     chunk.continuation_type = continuation_type
                     chunk.needs_review = (continuation_type == 'partial')
                     chunk.merge_evidence = self._compile_merge_evidence(merge_evidences)
                     chunks.append(chunk)
-                    buffer = []
-                    has_cross_page = False
-                    continuation_type = "none"
-                    merge_evidences = []
-                chunks.append(self._create_chunk([seg], heading_path, chunk_type=seg_type.lower()))
+                
+                # Now create the bonded Table/Picture chunk
+                # But ONLY if the caption type matches the block type
+                if caption_seg:
+                    caption_info = caption_seg.get('caption_info', {})
+                    expected_type = caption_info.get('target_type', '')
+                    
+                    # Type matching rules:
+                    # - "Table" caption should only bond with Table blocks
+                    # - "Figure/Chart/Graph" caption should only bond with Picture blocks
+                    # - "Equation/Formula" caption should only bond with Formula blocks
+                    type_matches = False
+                    if expected_type == 'Table' and seg_type == 'Table':
+                        type_matches = True
+                    elif expected_type in ['Figure', 'Exhibit'] and seg_type == 'Picture':
+                        type_matches = True
+                    elif expected_type == 'Equation' and seg_type == 'Formula':
+                        type_matches = True
+                    elif not expected_type:  # No specific type, allow any
+                        type_matches = True
+                    
+                    if type_matches:
+                        # Bond caption + notes + block into single atomic unit
+                        bonded_segments = [caption_seg] + notes_segs + [seg]
+                        caption_text = caption_seg.get('text', '').strip()
+                        
+                        # Use structural heading path, NOT the caption as the heading
+                        effective_heading_path = self.structural_heading_path or current_heading_path
+                        
+                        chunk = self._create_chunk(
+                            bonded_segments, 
+                            effective_heading_path, 
+                            chunk_type=seg_type.lower()
+                        )
+                        # Attach caption metadata for RAG enrichment
+                        chunk.merge_evidence = {
+                            "bonded": True,
+                            "caption_text": caption_text,
+                            "notes_count": len(notes_segs),
+                            "source_segments": [s.get('segment_id', '') for s in bonded_segments],
+                        }
+                        chunks.append(chunk)
+                        
+                        logger.info(f"Caption bonded: {caption_text} -> {seg_type} ({len(notes_segs)} notes)")
+                    else:
+                        # Type mismatch: flush caption as separate chunk, block standalone
+                        logger.info(f"Caption type mismatch: {expected_type} caption cannot bond with {seg_type} block")
+                        # Flush caption + notes
+                        all_caption_content = [caption_seg] + notes_segs
+                        if all_caption_content:
+                            chunk = self._create_chunk(all_caption_content, current_heading_path)
+                            chunks.append(chunk)
+                        # Create standalone block
+                        chunks.append(self._create_chunk([seg], heading_path, chunk_type=seg_type.lower()))
+                else:
+                    # No caption in buffer, just create standalone chunk
+                    if notes_segs:
+                        # Flush notes first
+                        chunk = self._create_chunk(notes_segs, current_heading_path)
+                        chunks.append(chunk)
+                    
+                    chunks.append(self._create_chunk([seg], heading_path, chunk_type=seg_type.lower()))
+                
+                # Clear buffer
+                buffer = []
+                has_cross_page = False
+                continuation_type = "none"
+                merge_evidences = []
                 continue
             
             # =================================================================
@@ -2531,13 +2889,27 @@ class LogicSegmenter:
                 continue
             
             # =================================================================
+            # Rule 5.5: Detect block captions in Paragraphs (side/bottom captions)
+            # =================================================================
+            # Sometimes PDF parsers misclassify "Table 1.2" as Paragraph instead of Header
+            # We still need to detect and mark these for bonding
+            if seg_type in ['Paragraph', 'Text']:
+                is_block_caption, caption_info = self.caption_bonding_helper.detect_caption(seg)
+                if is_block_caption:
+                    seg['is_block_caption'] = True
+                    seg['caption_info'] = caption_info
+                    buffer.append(seg)
+                    logger.debug(f"Paragraph caption detected: {caption_info.get('full_caption_id', '')} - buffering for bonding")
+                    continue
+            
+            # =================================================================
             # Default: Add to buffer
             # =================================================================
             buffer.append(seg)
             
             # =================================================================
             # Rule 6: Flush if buffer exceeds threshold (with lookahead)
-            # NEW v2.3: Check if next non-noise segment is a continuation
+            # Check if next non-noise segment is a continuation
             #           If so, delay flush to preserve paragraph integrity
             # =================================================================
             if len(buffer) >= self.config.MAX_BUFFER_SEGMENTS:
@@ -2634,18 +3006,139 @@ class LogicSegmenter:
     def _post_process_chunks(self, chunks: List[EnrichedChunk]) -> List[EnrichedChunk]:
         """
         Post-processing:
-        1. Merge short adjacent chunks under same heading
-        2. Add context overlap from previous chunk
+        1. Bond orphan captions with adjacent Table/Picture chunks (bottom caption repair)
+        2. Merge short adjacent chunks under same heading
+        3. Add context overlap from previous chunk
         """
         if not chunks:
             return chunks
         
-        processed = []
+        # Phase 1: Orphan caption bonding (bottom caption repair)
+        # Detect chunks that are block captions but weren't bonded
+        # and retroactively merge them with preceding Table/Picture chunks
+        bonded_chunks = []
+        skip_next = False
         
         for i, chunk in enumerate(chunks):
+            if skip_next:
+                skip_next = False
+                continue
+            
+            # Check if this is an orphan caption (starts with Table/Figure but wasn't bonded)
+            is_orphan_caption = False
+            content = chunk.content.strip()
+            if chunk.chunk_type in ['explanation', 'header'] and content:
+                is_caption, caption_info = self.caption_bonding_helper.detect_caption({
+                    'text': content.split('\n')[0]  # Check first line only
+                })
+                if is_caption and not chunk.merge_evidence.get('bonded'):
+                    is_orphan_caption = True
+            
+            if is_orphan_caption:
+                # First, try to bond with a PRECEDING Table/Picture chunk
+                for j in range(len(bonded_chunks) - 1, max(0, len(bonded_chunks) - 3) - 1, -1):
+                    prev_chunk = bonded_chunks[j]
+                    if prev_chunk.chunk_type in ['table', 'picture', 'formula']:
+                        # Skip if this table already has a caption bonded
+                        if prev_chunk.merge_evidence.get('bonded'):
+                            continue
+                        
+                        # Check if they're on the same page or adjacent pages
+                        same_or_adjacent_page = (
+                            set(prev_chunk.page_range) & set(chunk.page_range) or
+                            abs(max(prev_chunk.page_range) - min(chunk.page_range)) <= 1
+                        )
+                        if same_or_adjacent_page:
+                            # Bond: prepend caption to table content
+                            prev_chunk.content = chunk.content + "\n" + prev_chunk.content if prev_chunk.content else chunk.content
+                            prev_chunk.source_segments.extend(chunk.source_segments)
+                            prev_chunk.merge_evidence = {
+                                "bonded": True,
+                                "caption_text": content.split('\n')[0][:50],
+                                "bond_type": "post_process_orphan_caption",
+                            }
+                            logger.info(f"Post-process bonded orphan caption (backward): {content[:30]}... -> {prev_chunk.chunk_type}")
+                            is_orphan_caption = False
+                            break
+                
+                # If still orphan, try to bond with the NEXT Table/Picture chunk (look ahead)
+                if is_orphan_caption:
+                    for k in range(i + 1, min(len(chunks), i + 4)):
+                        next_chunk = chunks[k]
+                        if next_chunk.chunk_type in ['table', 'picture', 'formula']:
+                            if not next_chunk.merge_evidence.get('bonded'):
+                                same_or_adjacent_page = (
+                                    set(next_chunk.page_range) & set(chunk.page_range) or
+                                    abs(min(next_chunk.page_range) - max(chunk.page_range)) <= 1
+                                )
+                                if same_or_adjacent_page:
+                                    # Bond: prepend caption to next chunk
+                                    next_chunk.content = chunk.content + "\n" + next_chunk.content if next_chunk.content else chunk.content
+                                    next_chunk.source_segments = chunk.source_segments + next_chunk.source_segments
+                                    next_chunk.merge_evidence = {
+                                        "bonded": True,
+                                        "caption_text": content.split('\n')[0][:50],
+                                        "bond_type": "post_process_forward_bond",
+                                    }
+                                    logger.info(f"Post-process bonded orphan caption (forward): {content[:30]}... -> {next_chunk.chunk_type}")
+                                    is_orphan_caption = False
+                                    break
+                            break  # Only check the first Table/Picture
+                
+                if not is_orphan_caption:
+                    continue  # Skip this chunk, it was merged
+            
+            bonded_chunks.append(chunk)
+        
+        # Phase 1.5: Table-Then-Caption bonding
+        # Handle case where Docling outputs Table BEFORE Caption (visual ordering issue)
+        # Check each unbonded Table/Picture and see if it's followed by its Caption
+        final_bonded = []
+        skip_indices = set()
+        
+        for i, chunk in enumerate(bonded_chunks):
+            if i in skip_indices:
+                continue
+            
+            # If this is an unbonded Table/Picture, check if the next chunk is its Caption
+            if chunk.chunk_type in ['table', 'picture', 'formula'] and not chunk.merge_evidence.get('bonded'):
+                # Look ahead for a Caption
+                for j in range(i + 1, min(len(bonded_chunks), i + 3)):
+                    if j in skip_indices:
+                        continue
+                    next_chunk = bonded_chunks[j]
+                    if next_chunk.chunk_type in ['header', 'explanation']:
+                        # Check if it's a caption for this table
+                        is_caption, _ = self.caption_bonding_helper.detect_caption({
+                            'text': next_chunk.content.split('\n')[0]
+                        })
+                        if is_caption and not next_chunk.merge_evidence.get('bonded'):
+                            # Bond: prepend caption to table
+                            chunk.content = next_chunk.content + "\n" + chunk.content if chunk.content else next_chunk.content
+                            chunk.source_segments = next_chunk.source_segments + chunk.source_segments
+                            chunk.merge_evidence = {
+                                "bonded": True,
+                                "caption_text": next_chunk.content.split('\n')[0][:50],
+                                "bond_type": "table_then_caption",
+                            }
+                            skip_indices.add(j)
+                            logger.info(f"Table-then-Caption bonded: {next_chunk.content[:30]}... -> {chunk.chunk_type}")
+                            break
+                    # Stop if we hit another table/picture
+                    elif next_chunk.chunk_type in ['table', 'picture', 'formula']:
+                        break
+            
+            final_bonded.append(chunk)
+        
+        bonded_chunks = final_bonded
+        
+        # Phase 2: Original post-processing
+        processed = []
+        
+        for i, chunk in enumerate(bonded_chunks):
             # Add context overlap (if enabled and not first chunk)
             if self.config.ENABLE_OVERLAP and i > 0 and chunk.chunk_type not in ['header', 'picture', 'table']:
-                prev_chunk = chunks[i - 1]
+                prev_chunk = bonded_chunks[i - 1]
                 if prev_chunk.content and prev_chunk.chunk_type not in ['header', 'picture', 'table']:
                     # Get last N sentences from previous chunk
                     if self.pos_analyzer:
@@ -2874,7 +3367,7 @@ class LogicSegmenter:
         overlap_count = 0
         imperative_count = 0
         
-        # NEW v2.1: Cross-page statistics
+        # Cross-page statistics
         cross_page_count = 0
         full_continuation_count = 0
         partial_continuation_count = 0
@@ -2896,7 +3389,7 @@ class LogicSegmenter:
                 if sent.get('is_imperative', False):
                     imperative_count += 1
             
-            # NEW v2.1: Cross-page continuation stats
+            # Cross-page continuation stats
             if chunk.is_cross_page:
                 cross_page_count += 1
             if chunk.continuation_type == 'full':
@@ -2915,7 +3408,7 @@ class LogicSegmenter:
             "max_words": max(word_counts) if word_counts else 0,
             "chunks_with_overlap": overlap_count,
             "imperative_sentences_detected": imperative_count,
-            # NEW v2.1: Cross-page continuation stats
+            # Cross-page continuation stats
             "cross_page_chunks": cross_page_count,
             "full_continuations": full_continuation_count,
             "partial_continuations": partial_continuation_count,
