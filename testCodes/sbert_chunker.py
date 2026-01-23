@@ -3885,7 +3885,7 @@ if __name__ == "__main__":
     # Base directory for the project
     base_dir = Path(__file__).parent.parent
     input_dir = base_dir / "outputs" / "docling_json"
-    output_dir = base_dir / "outputs" / "Chunks"
+    output_dir = base_dir / "outputs" / "Chunks_sbert"
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # Scan for JSON files from parser_docling
