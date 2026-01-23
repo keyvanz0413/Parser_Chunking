@@ -1,22 +1,19 @@
 """
-Logic Segmenter Module (Enhanced Furniture Detection)
+Semantic Chunker Module - Intelligent Document Chunking for RAG
 
-Processes flat_segments from parser_docling.py and applies:
-1. Furniture Detection - Multi-feature page decoration detection
+A comprehensive PDF document chunking pipeline that transforms raw text segments
+into semantically enriched chunks optimized for Retrieval-Augmented Generation (RAG).
+
+Core Capabilities:
+1. Furniture Detection - Multi-feature page decoration detection (headers/footers/page numbers)
 2. Reading Order Correction - Column-aware segment reordering for multi-column layouts
 3. Heading Path Reconstruction - Stack-based hierarchy rebuilding with backfilling
-4. POS Tagging (via spaCy) - Sentence role identification with Imperative detection
-5. Rule-Based Grouping - List aggregation, definition detection, etc.
-6. Tag Enrichment - 20+ semantic tags from taxonomy (enhanced with Theorem/Lemma/Proof)
+4. Sentence Role Identification - spaCy-based POS tagging + heuristic rules (~94% accuracy)
+5. Rule-Based Grouping - List aggregation, definition detection, cross-page continuation
+6. Tag Enrichment - 20+ semantic tags from discourse taxonomy
 7. Context Overlap - Each chunk carries context from previous chunk for RAG continuity
 8. Token-based Length Control - Prevents extreme chunk sizes
-9. Cross-Page Continuation Detection - Hyphenation, open clause, fragment detection, dehyphenation
-
-Improvements:
-- FurnitureDetector: Position-band + frequency + multi-feature classification
-- Dehyphenation: Cross-page hyphen repair with word validation
-- Enhanced column detection with projection profile analysis
-- Visual heading level inference based on font size ranking
+9. Cross-Page Continuation Detection - Hyphenation, open clause, fragment detection
 
 Pipeline Architecture:
 - Pre-Phase: Furniture detection and document-level statistics

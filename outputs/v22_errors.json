@@ -1,0 +1,502 @@
+[
+  {
+    "text": "This  text  can  help  you  become  an  informed practitioner  of  investments.",
+    "true": "topic",
+    "pred": "application"
+  },
+  {
+    "text": "tranche See collateralized mortgage obligation.",
+    "true": "explanation",
+    "pred": "topic"
+  },
+  {
+    "text": "Click on the News and Research link, then choose Mutual Funds from the submenu.",
+    "true": "explanation",
+    "pred": "procedure"
+  },
+  {
+    "text": "put-call parity theorem An equation representing the proper relation between put and call prices.",
+    "true": "explanation",
+    "pred": "formula"
+  },
+  {
+    "text": "term insurance Provides a death benefit only, with no buildup of cash value.",
+    "true": "explanation",
+    "pred": "topic"
+  },
+  {
+    "text": "One warning about this practice, however.",
+    "true": "explanation",
+    "pred": "topic"
+  },
+  {
+    "text": "Suppose, for  example, that the firm prepares a scatter diagram as in Figure 23.3 that relates  its  business  profits  (measured in dollars) in each of the last 40 quarters to the   dollar/pound exchange rate in  that  quarter.",
+    "true": "assumption",
+    "pred": "reference"
+  },
+  {
+    "text": "If one firm observes  another  underperforming,  it  can  acquire  the  underperforming  business  and replace management with its own team.",
+    "true": "explanation",
+    "pred": "example"
+  },
+  {
+    "text": "Pricing with Storage Costs",
+    "true": "topic",
+    "pred": "explanation"
+  },
+  {
+    "text": "Formulate the return objective of an investment policy statement for the Maclins.",
+    "true": "explanation",
+    "pred": "topic"
+  },
+  {
+    "text": "We can view the process of asset allocation as consisting of the following steps:",
+    "true": "explanation",
+    "pred": "topic"
+  },
+  {
+    "text": "Hong Kong is a case in point.",
+    "true": "topic",
+    "pred": "explanation"
+  },
+  {
+    "text": "Security Analysis 551",
+    "true": "topic",
+    "pred": "explanation"
+  },
+  {
+    "text": "If in 2021 investors took the mean historical return and standard deviation of the S&P 500 as proxies for its expected return and standard deviation, then the values of outstanding assets would imply a degree of risk aversion of about A = 3.12 for the average investor.",
+    "true": "formula",
+    "pred": "explanation"
+  },
+  {
+    "text": "The  point,  however,  is that with hundreds of market newsletters, you can find one that has stumbled onto an apparently remarkable string of successful  predictions without any real degree of skill.",
+    "true": "explanation",
+    "pred": "procedure"
+  },
+  {
+    "text": "[ α A ╱  σ 2 ( e A )",
+    "true": "explanation",
+    "pred": "procedure"
+  },
+  {
+    "text": "In general, the formula for the accrued interest between two dates is",
+    "true": "explanation",
+    "pred": "formula"
+  },
+  {
+    "text": "Concept Check 23.10",
+    "true": "topic",
+    "pred": "explanation"
+  },
+  {
+    "text": "At  first  blush,  Kendall's  results  were  disturbing  to  some  financial  economists.",
+    "true": "topic",
+    "pred": "assumption"
+  },
+  {
+    "text": "Here is how:",
+    "true": "irrelevant",
+    "pred": "explanation"
+  },
+  {
+    "text": "Equation 5.5 can be rearranged to solve for the real rate as:",
+    "true": "explanation",
+    "pred": "formula"
+  },
+  {
+    "text": "implying that 1 + y 2 = 1.055.",
+    "true": "explanation",
+    "pred": "topic"
+  },
+  {
+    "text": "Figure 3.3 Displayed Market Depth (Dollar value of shares offered at best bid plus best ask price)",
+    "true": "reference",
+    "pred": "explanation"
+  },
+  {
+    "text": "Sector  allocation  within  the  equity  market  results  in  excess  performance  of  129  basis points, and security selection within sectors contributes 18 basis points.",
+    "true": "explanation",
+    "pred": "evidence"
+  },
+  {
+    "text": "Three important tax deferral options can meaningfully affect optimal asset allocation for individual investors.",
+    "true": "explanation",
+    "pred": "topic"
+  },
+  {
+    "text": "The firm is in the 21% tax bracket.",
+    "true": "topic",
+    "pred": "explanation"
+  },
+  {
+    "text": "Financial assets can be categorized as fixed income, equity, or derivative instruments.",
+    "true": "explanation",
+    "pred": "topic"
+  },
+  {
+    "text": "Example 26.3 VC Equity Share and Dilution",
+    "true": "topic",
+    "pred": "example"
+  },
+  {
+    "text": "Risk-averse mean-variance investors measure the risk of the optimal risky portfolio by its variance.",
+    "true": "explanation",
+    "pred": "topic"
+  },
+  {
+    "text": "Several factors must be considered when choosing a brokerage firm to execute your trades.",
+    "true": "explanation",
+    "pred": "topic"
+  },
+  {
+    "text": "If the yield to maturity on 3-year zero-coupon bonds is 7%, then the yield on 4-year bonds will satisfy the following equation:",
+    "true": "explanation",
+    "pred": "example"
+  },
+  {
+    "text": "After three years, one of the newsletters would have had a perfect prediction record.",
+    "true": "explanation",
+    "pred": "topic"
+  },
+  {
+    "text": "The risk-free rate is 3%.",
+    "true": "topic",
+    "pred": "evidence"
+  },
+  {
+    "text": "Var( r p ) = .10 × .10 × 26.25 + .10 × .30 × 8.91 + .10 × .40 × 5.52   /thinspace[/thinspacerow 1] + .30 × .10 × 8.91 + .30 × .30 × 15.98 + .30 × .40 × 12.16   /thinspace[/thinspacerow 2] + .40 × .10 × 5.52 + .40 × .30 × 12.16 + .40 × .40 × 9.38   /thinspace[/thinspacerow 3] = 7.096 Concept Check 7.1 asks you to explore the bordered covariance matrix a bit further.",
+    "true": "explanation",
+    "pred": "example"
+  },
+  {
+    "text": "Because the right to exercise early may be useful in some circumstances, it will command a premium.",
+    "true": "explanation",
+    "pred": "evidence"
+  },
+  {
+    "text": "Recall  that  such  contracts  entail  delivery  or  acceptance  of  one  currency  for another at a stipulated exchange rate.",
+    "true": "explanation",
+    "pred": "example"
+  },
+  {
+    "text": "at  least  until  Lehman  Brothers smashed that record in 2008.",
+    "true": "explanation",
+    "pred": "topic"
+  },
+  {
+    "text": "Where there is a will to cheat, there usually will be a way.",
+    "true": "explanation",
+    "pred": "topic"
+  },
+  {
+    "text": "For  example,  a  January expiration call option on Microsoft stock with an exercise price of $280 entitles its owner to purchase Microsoft stock for a price of $280 at any time up to and including the expiration date.",
+    "true": "example",
+    "pred": "evidence"
+  },
+  {
+    "text": "Risk premium on the S&P 500 portfolio.",
+    "true": "topic",
+    "pred": "explanation"
+  },
+  {
+    "text": "Use Spreadsheet 16.3 to test some of the rules for duration presented a few pages ago.",
+    "true": "explanation",
+    "pred": "procedure"
+  },
+  {
+    "text": "1 Maurice Kendall,  'The  Analysis  of  Economic  Time  Series,  Part  I:  Prices,' Journal  of  the  Royal  Statistical Society 96 (1953).",
+    "true": "explanation",
+    "pred": "assumption"
+  },
+  {
+    "text": "By construction, the common factor has zero expected value because it measures new information concerning the macroeconomy; new information implies a revision to current expectations, and if initial expectations are rational, then such revisions should average out to zero.",
+    "true": "interpretation",
+    "pred": "explanation"
+  },
+  {
+    "text": "Measures of Risk",
+    "true": "topic",
+    "pred": "explanation"
+  },
+  {
+    "text": "5 4 Using this  probability,  the  continuously  compounded  expected  rate  of  return  on  the  stock  is  .10.",
+    "true": "explanation",
+    "pred": "example"
+  },
+  {
+    "text": "The T-bill rate is 4%.",
+    "true": "topic",
+    "pred": "evidence"
+  },
+  {
+    "text": "In  the 1900-2020 period, U.S. stocks outperformed bills by 7.7% per year versus average outperformance of only 5.3% outside the U.S. 15 On the other hand, Panel A of Figure 5.10 shows that several countries outperformed the United States, so by that standard, the U.S. was not exceptional.",
+    "true": "reference",
+    "pred": "comparison"
+  },
+  {
+    "text": "Although options can be  used  by  speculators  as  effectively leveraged stock positions, as in portfolio B, they also can be used by investors who desire to tailor their risk exposures in creative ways, as in portfolio C.",
+    "true": "explanation",
+    "pred": "interpretation"
+  },
+  {
+    "text": "Even greater problems arise in the interpretation of the financial statements of foreign firms.",
+    "true": "explanation",
+    "pred": "topic"
+  },
+  {
+    "text": "Table  3.2  compares  stock purchases to short sales.",
+    "true": "reference",
+    "pred": "topic"
+  },
+  {
+    "text": "Notice the trade-off between the front-end loads versus 12b-1 charges in the choice between Class A and Class C shares.",
+    "true": "explanation",
+    "pred": "example"
+  },
+  {
+    "text": "Figure 23.5 Yield spread between 10-year Treasury and Baa-rated corporate bonds",
+    "true": "reference",
+    "pred": "topic"
+  },
+  {
+    "text": "The onset of this",
+    "true": "topic",
+    "pred": "explanation"
+  },
+  {
+    "text": "+  .5  ×  1.0)",
+    "true": "irrelevant",
+    "pred": "explanation"
+  },
+  {
+    "text": "Revised (Posterior) Expectations / Step 5: Portfolio Optimization REFERENCES TO CFA PROBLEMS 995 GLOSSARY G-1 NAME INDEX I SUBJECT INDEX I-4 NOTATION, FORMULAS F-1",
+    "true": "explanation",
+    "pred": "procedure"
+  },
+  {
+    "text": "The optimal risky portfolio with the analysts' new forecasts of alpha",
+    "true": "topic",
+    "pred": "explanation"
+  },
+  {
+    "text": "(See portable alpha. )",
+    "true": "explanation",
+    "pred": "topic"
+  },
+  {
+    "text": "To summarize, a passive strategy involves investment in two passive portfolios: virtually risk-free short-term T-bills (or, alternatively, a money market fund) and a stock fund that mimics a broad market index.",
+    "true": "explanation",
+    "pred": "conclusion"
+  },
+  {
+    "text": "Level III CFA Study Guide 2-4.    1988 Level",
+    "true": "topic",
+    "pred": "explanation"
+  },
+  {
+    "text": "Figure 20.3 Payoff and profit to call writer at expiration The solid line in Figure 20.4 plots the payoff at expiration on a FinCorp put with an",
+    "true": "reference",
+    "pred": "explanation"
+  },
+  {
+    "text": "Some of the most well-known management companies are  Fidelity,  Vanguard, and BlackRock.",
+    "true": "explanation",
+    "pred": "topic"
+  },
+  {
+    "text": "This is an example of investor underreaction to the information contained in accruals.",
+    "true": "explanation",
+    "pred": "topic"
+  },
+  {
+    "text": "Example 15.3 Holding-Period Returns on Zero-Coupon Bonds",
+    "true": "topic",
+    "pred": "example"
+  },
+  {
+    "text": "Investments",
+    "true": "irrelevant",
+    "pred": "explanation"
+  },
+  {
+    "text": "Fama and French propose a method to quantify the size risk premium.",
+    "true": "explanation",
+    "pred": "topic"
+  },
+  {
+    "text": "Find the holding-period return for a 1-year investment period if the bond is selling at a yield to maturity of 7% by the end of the year.",
+    "true": "explanation",
+    "pred": "procedure"
+  },
+  {
+    "text": "Turnover is  the ratio of the trading activity of a portfolio to the assets of the portfolio.",
+    "true": "explanation",
+    "pred": "definition"
+  },
+  {
+    "text": "Put bonds give the bondholder rather than the issuer the option to terminate or extend the life of the bond.",
+    "true": "explanation",
+    "pred": "conclusion"
+  },
+  {
+    "text": "These  results  are  important.",
+    "true": "topic",
+    "pred": "explanation"
+  },
+  {
+    "text": "Stocks with a beta of zero offer an expected rate of return of zero.",
+    "true": "explanation",
+    "pred": "topic"
+  },
+  {
+    "text": "But an efficient market adherent would discount this track record, arguing that such a simplistic rule could not really generate abnormal returns, and that the CAPM may not be a good benchmark for returns in this case.",
+    "true": "explanation",
+    "pred": "example"
+  },
+  {
+    "text": "Interest Rates and Inflation",
+    "true": "topic",
+    "pred": "explanation"
+  },
+  {
+    "text": "and 'only' 13% of her investment capital will be borrowed.",
+    "true": "explanation",
+    "pred": "topic"
+  },
+  {
+    "text": "Commodity-linked bear bond.",
+    "true": "topic",
+    "pred": "explanation"
+  },
+  {
+    "text": "This implies that p = 1 + r f",
+    "true": "interpretation",
+    "pred": "evidence"
+  },
+  {
+    "text": "This means that the effective duration will be a function of variables that would not matter to conventional duration, for example, the volatility of interest rates.",
+    "true": "definition",
+    "pred": "explanation"
+  },
+  {
+    "text": "which implies that r 3 = 1.07 3 /1.06 2 -1 = .09028 = 9.028%.",
+    "true": "interpretation",
+    "pred": "example"
+  },
+  {
+    "text": "As useful as the constant-growth DDM formula is, you need to remember that it is based on a strong simplifying assumption, namely, that the dividend growth rate will be constant forever.",
+    "true": "explanation",
+    "pred": "formula"
+  },
+  {
+    "text": "If the value is negative, borrow in the United States, lend in the United Kingdom, and take a short position in pound futures.",
+    "true": "explanation",
+    "pred": "example"
+  },
+  {
+    "text": "End of Chapter Material 574-582",
+    "true": "topic",
+    "pred": "explanation"
+  },
+  {
+    "text": "Calculate the value added from her stock selection ability within countries.",
+    "true": "topic",
+    "pred": "procedure"
+  },
+  {
+    "text": "Concept Check 2.2",
+    "true": "topic",
+    "pred": "explanation"
+  },
+  {
+    "text": "Carl Icahn.",
+    "true": "irrelevant",
+    "pred": "example"
+  },
+  {
+    "text": "Positive serial correlation means that positive returns tend to follow positive returns (a momentum type of property).",
+    "true": "definition",
+    "pred": "evidence"
+  },
+  {
+    "text": "While a market-neutral fund will have no sensitivity to an index for that market, it may have significant betas, or loading, on other factors, such as credit conditions.",
+    "true": "example",
+    "pred": "evidence"
+  },
+  {
+    "text": "The conversion premium is the excess of the bond's value over the conversion price.",
+    "true": "explanation",
+    "pred": "definition"
+  },
+  {
+    "text": "Wilson remarks that the Rainbow portfolio has a higher expected return because it has greater nonsystematic risk than Eagle's portfolio.",
+    "true": "explanation",
+    "pred": "conclusion"
+  },
+  {
+    "text": "The  correlation  of  return  between  Miller  and  Mac  is  -.05  and between Miller and Green is +.05.",
+    "true": "explanation",
+    "pred": "evidence"
+  },
+  {
+    "text": "Venture Capital",
+    "true": "topic",
+    "pred": "explanation"
+  },
+  {
+    "text": "Do the same for  the  public  utility  industry  and  you  will  find  lower  rates  of  return,  lower  investment rates, and higher dividend payout rates.",
+    "true": "explanation",
+    "pred": "procedure"
+  },
+  {
+    "text": "diversifying  the  investments  of  the plan so as to   minimize the risk of large losses, unless under the   circumstances it is clearly prudent not to do so. . .",
+    "true": "explanation",
+    "pred": "evidence"
+  },
+  {
+    "text": "They are not personally liable for the firm's obligations.",
+    "true": "topic",
+    "pred": "explanation"
+  },
+  {
+    "text": "exchanges Auction markets in which members congregate (physically or electronically) to trade securities.",
+    "true": "explanation",
+    "pred": "topic"
+  },
+  {
+    "text": "As with operating expenses, investors are not explicitly billed for 12b-1 charges.",
+    "true": "explanation",
+    "pred": "topic"
+  },
+  {
+    "text": "Covariance.",
+    "true": "irrelevant",
+    "pred": "explanation"
+  },
+  {
+    "text": "We begin by thinking about an insurance company selling many identical fire insurance policies.",
+    "true": "explanation",
+    "pred": "topic"
+  },
+  {
+    "text": "Both Conrad and Kaul 13 and Lo and MacKinlay 14 examine weekly returns of NYSE stocks and find positive serial correlation over short horizons.",
+    "true": "explanation",
+    "pred": "evidence"
+  },
+  {
+    "text": "Finally, the value of debt in 2021 is subtracted from firm value to arrive at the intrinsic value of equity (cell K37), and value per share is calculated in cell L37 as equity value divided by number of shares.",
+    "true": "explanation",
+    "pred": "conclusion"
+  },
+  {
+    "text": "The market value of the shareholders' equity investment equals the difference between the current values of all assets and liabilities.",
+    "true": "explanation",
+    "pred": "limitation"
+  },
+  {
+    "text": "The value of a put option on VT appears in Figure 21.13.",
+    "true": "reference",
+    "pred": "topic"
+  }
+]

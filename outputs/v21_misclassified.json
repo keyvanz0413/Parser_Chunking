@@ -1,0 +1,1024 @@
+[
+  {
+    "text": "This  text  can  help  you  become  an  informed practitioner  of  investments.",
+    "predicted_role": "application",
+    "true_role": "topic",
+    "old_role": "explanation",
+    "chunk_id": "chunk_0618"
+  },
+  {
+    "text": "tranche See collateralized mortgage obligation.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_7082"
+  },
+  {
+    "text": "Click on the News and Research link, then choose Mutual Funds from the submenu.",
+    "predicted_role": "procedure",
+    "true_role": "explanation",
+    "old_role": "procedure",
+    "chunk_id": "chunk_2633"
+  },
+  {
+    "text": "As Delta stock gets progressively cheaper, it becomes ever more attractive and other stocks look relatively less attractive.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_2457"
+  },
+  {
+    "text": "term insurance Provides a death benefit only, with no buildup of cash value.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "topic",
+    "chunk_id": "chunk_7079"
+  },
+  {
+    "text": "One warning about this practice, however.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_5194"
+  },
+  {
+    "text": "Much of this pressure is due to the impact of electronic trading.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_0983"
+  },
+  {
+    "text": "If one firm observes  another  underperforming,  it  can  acquire  the  underperforming  business  and replace management with its own team.",
+    "predicted_role": "example",
+    "true_role": "assumption",
+    "old_role": "assumption",
+    "chunk_id": "chunk_0646"
+  },
+  {
+    "text": "Short-selling  periodically  comes  under  attack,  particularly  during  times  of  financial stress when share prices fall.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_1055"
+  },
+  {
+    "text": "A portfolio management organization analyzes 60 stocks and constructs a mean-variance   efficient portfolio using only these 60 securities.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_2379"
+  },
+  {
+    "text": "The possible effect of labor income on equilibrium returns can be appreciated from its important effect on personal portfolio choice.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_2554"
+  },
+  {
+    "text": "If the firm is successful, the value of equity will increase; if not, it will decrease.",
+    "predicted_role": "explanation",
+    "true_role": "assumption",
+    "old_role": "assumption",
+    "chunk_id": "chunk_0627"
+  },
+  {
+    "text": "What would be the appropriate values for u and d if your binomial model is set up using: 1 period of 1 year.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_5320"
+  },
+  {
+    "text": "Formulate the return objective of an investment policy statement for the Maclins.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "procedure",
+    "chunk_id": "chunk_6891"
+  },
+  {
+    "text": "THE  TRADITIONAL  ASSET  CLASSES of  publicly  traded  stocks  and  bonds  still  dominate  the portfolios of most  individual and  institutional investors.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_6200"
+  },
+  {
+    "text": "We can view the process of asset allocation as consisting of the following steps:",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "mechanism",
+    "chunk_id": "chunk_6700"
+  },
+  {
+    "text": "When stocks go ex dividend, the share price declines by a discrete amount, roughly equal to the amount of the dividend.",
+    "predicted_role": "explanation",
+    "true_role": "assumption",
+    "old_role": "assumption",
+    "chunk_id": "chunk_5194"
+  },
+  {
+    "text": "Figure 18.1 Dividend growth for two earnings reinvestment policies The dividend of the company, therefore, will be $2 (40% of $5 earnings) instead of $5.",
+    "predicted_role": "conclusion",
+    "true_role": "irrelevant",
+    "old_role": "reference",
+    "chunk_id": "chunk_4296"
+  },
+  {
+    "text": "To offset its foreign exchange exposure, the firm might engage in transactions that bring it profits when the pound depreciates.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_5585"
+  },
+  {
+    "text": "If in 2021 investors took the mean historical return and standard deviation of the S&P 500 as proxies for its expected return and standard deviation, then the values of outstanding assets would imply a degree of risk aversion of about A = 3.12 for the average investor.",
+    "predicted_role": "explanation",
+    "true_role": "assumption",
+    "old_role": "assumption",
+    "chunk_id": "chunk_1662"
+  },
+  {
+    "text": "But  the  unusual  dynamic  behind  the  inflation  surge  was the interaction between  these  shocks.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_4069"
+  },
+  {
+    "text": "The  point,  however,  is that with hundreds of market newsletters, you can find one that has stumbled onto an apparently remarkable string of successful  predictions without any real degree of skill.",
+    "predicted_role": "procedure",
+    "true_role": "explanation",
+    "old_role": "procedure",
+    "chunk_id": "chunk_2893"
+  },
+  {
+    "text": "Table 6.5 Points along indifference curve for investors with risk aversion of either A = 2 or A = 4.",
+    "predicted_role": "formula",
+    "true_role": "irrelevant",
+    "old_role": "reference",
+    "chunk_id": "chunk_1629"
+  },
+  {
+    "text": "[ α A ╱  σ 2 ( e A )",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "procedure",
+    "chunk_id": "chunk_2349"
+  },
+  {
+    "text": "These  ambiguities  plague  security  analysts, whose job is to uncover as much information as possible concerning the firm's expected prospects.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_1079"
+  },
+  {
+    "text": "If,  however,  the  firm  goes bankrupt,  the  corporate  bond  is  likely  to provide a lower return than the government bond.",
+    "predicted_role": "explanation",
+    "true_role": "assumption",
+    "old_role": "assumption",
+    "chunk_id": "chunk_3464"
+  },
+  {
+    "text": "6 The progressively smaller impact of interest rate increases results largely from the fact that at higher rates, the bond is worth less.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_3334"
+  },
+  {
+    "text": "Many of the assets underlying these pools were illiquid, hard to value, and highly dependent on forecasts of future performance of other loans.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_0702"
+  },
+  {
+    "text": "The average outcome for many independent trials of an experiment will approach the expected value of the experiment.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_6997"
+  },
+  {
+    "text": "Here is how:",
+    "predicted_role": "topic",
+    "true_role": "irrelevant",
+    "old_role": "irrelevant",
+    "chunk_id": "chunk_5097"
+  },
+  {
+    "text": "implying that 1 + y 2 = 1.055.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "formula",
+    "chunk_id": "chunk_3629"
+  },
+  {
+    "text": "Figure 3.3 Displayed Market Depth (Dollar value of shares offered at best bid plus best ask price)",
+    "predicted_role": "topic",
+    "true_role": "irrelevant",
+    "old_role": "reference",
+    "chunk_id": "chunk_0940"
+  },
+  {
+    "text": "Sector  allocation  within  the  equity  market  results  in  excess  performance  of  129  basis points, and security selection within sectors contributes 18 basis points.",
+    "predicted_role": "evidence",
+    "true_role": "explanation",
+    "old_role": "evidence",
+    "chunk_id": "chunk_5954"
+  },
+  {
+    "text": "It also requires daily recognition of  gains  or  losses  on  positions  through  a  margin  or  collateral account.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_3482"
+  },
+  {
+    "text": "Three important tax deferral options can meaningfully affect optimal asset allocation for individual investors.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "topic",
+    "chunk_id": "chunk_6733"
+  },
+  {
+    "text": "Financial assets can be categorized as fixed income, equity, or derivative instruments.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "topic",
+    "chunk_id": "chunk_0713"
+  },
+  {
+    "text": "Risk-averse mean-variance investors measure the risk of the optimal risky portfolio by its variance.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_2513"
+  },
+  {
+    "text": "Before 1971, all  OTC quotations were recorded manually and published daily on so-called  pink  sheets.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_0948"
+  },
+  {
+    "text": "Several factors must be considered when choosing a brokerage firm to execute your trades.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "topic",
+    "chunk_id": "chunk_1109"
+  },
+  {
+    "text": "If the yield to maturity on 3-year zero-coupon bonds is 7%, then the yield on 4-year bonds will satisfy the following equation:",
+    "predicted_role": "example",
+    "true_role": "assumption",
+    "old_role": "assumption",
+    "chunk_id": "chunk_3645"
+  },
+  {
+    "text": "After three years, one of the newsletters would have had a perfect prediction record.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "procedure",
+    "chunk_id": "chunk_2893"
+  },
+  {
+    "text": "The risk-free rate is 3%.",
+    "predicted_role": "evidence",
+    "true_role": "topic",
+    "old_role": "evidence",
+    "chunk_id": "chunk_1688"
+  },
+  {
+    "text": "This practice, known as grandstanding, has been well documented, with more IPO underpricing for companies backed by younger VCs.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_6370"
+  },
+  {
+    "text": "The figure shows the reaction of stock prices to on-air stock reports during the 'Midday Call' segment on CNBC.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_2836"
+  },
+  {
+    "text": "Median manager benchmarks are statistically unbiased measures of performance over long periods of time.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_6020"
+  },
+  {
+    "text": "Var( r p ) = .10 × .10 × 26.25 + .10 × .30 × 8.91 + .10 × .40 × 5.52   /thinspace[/thinspacerow 1] + .30 × .10 × 8.91 + .30 × .30 × 15.98 + .30 × .40 × 12.16   /thinspace[/thinspacerow 2] + .40 × .10 × 5.52 + .40 × .30 × 12.16 + .40 × .40 × 9.38   /thinspace[/thinspacerow 3] = 7.096 Concept Check 7.1 asks you to explore the bordered covariance matrix a bit further.",
+    "predicted_role": "example",
+    "true_role": "explanation",
+    "old_role": "formula",
+    "chunk_id": "chunk_1820"
+  },
+  {
+    "text": "Because the right to exercise early may be useful in some circumstances, it will command a premium.",
+    "predicted_role": "evidence",
+    "true_role": "explanation",
+    "old_role": "evidence",
+    "chunk_id": "chunk_5074"
+  },
+  {
+    "text": "hedging demands Demands for securities to hedge particular sources of risk, beyond the usual mean-variance diversification motivation.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_6992"
+  },
+  {
+    "text": "Recall  that  such  contracts  entail  delivery  or  acceptance  of  one  currency  for another at a stipulated exchange rate.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "procedure",
+    "chunk_id": "chunk_6085"
+  },
+  {
+    "text": "Recall the expres- sion for the square of the Sharpe ratio of the optimized risky portfolio:",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "procedure",
+    "chunk_id": "chunk_6537"
+  },
+  {
+    "text": "Washington is reviewing the options strategy to determine why the hedged portfolio did not perform as expected.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_5306"
+  },
+  {
+    "text": "The  return of this portfolio, called SMB (Small Minus Big), is simply the return on the smallstock   portfolio minus the return on the big-stock portfolio.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_3184"
+  },
+  {
+    "text": "The U.S. government borrows funds in large part by selling Treasury notes and Treasury bonds.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_0771"
+  },
+  {
+    "text": "The SML looks very similar, but it focuses on how expected return responds to beta.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "comparison",
+    "chunk_id": "chunk_2520"
+  },
+  {
+    "text": "at  least  until  Lehman  Brothers smashed that record in 2008.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_0648"
+  },
+  {
+    "text": "I plan to sell this investment as soon as the price increases to my original cost.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_3106"
+  },
+  {
+    "text": "Where there is a will to cheat, there usually will be a way.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_2840"
+  },
+  {
+    "text": "For  example,  a  January expiration call option on Microsoft stock with an exercise price of $280 entitles its owner to purchase Microsoft stock for a price of $280 at any time up to and including the expiration date.",
+    "predicted_role": "evidence",
+    "true_role": "example",
+    "old_role": "evidence",
+    "chunk_id": "chunk_0872"
+  },
+  {
+    "text": "They also found that even after controlling for a firm's financial characteristics, industry group helps to predict beta.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_2311"
+  },
+  {
+    "text": "1986 Level I CFA Study Guide 2.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_6918"
+  },
+  {
+    "text": "'I do not want to sell any bond in my portfolio for a lower price than I paid for the bond.'",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_3101"
+  },
+  {
+    "text": "Use Spreadsheet 16.3 to test some of the rules for duration presented a few pages ago.",
+    "predicted_role": "procedure",
+    "true_role": "explanation",
+    "old_role": "reference",
+    "chunk_id": "chunk_3839"
+  },
+  {
+    "text": "We will have much to say on this topic in the next chapter on interpreting financial statements.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_4393"
+  },
+  {
+    "text": "The Federal Reserve Board undertakes open-market purchases of U.S. Treasury securities in order to increase the supply of money.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_1463"
+  },
+  {
+    "text": "1 Maurice Kendall,  'The  Analysis  of  Economic  Time  Series,  Part  I:  Prices,' Journal  of  the  Royal  Statistical Society 96 (1953).",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "assumption",
+    "chunk_id": "chunk_2826"
+  },
+  {
+    "text": "By construction, the common factor has zero expected value because it measures new information concerning the macroeconomy; new information implies a revision to current expectations, and if initial expectations are rational, then such revisions should average out to zero.",
+    "predicted_role": "explanation",
+    "true_role": "interpretation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_2660"
+  },
+  {
+    "text": "5 4 Using this  probability,  the  continuously  compounded  expected  rate  of  return  on  the  stock  is  .10.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "example",
+    "chunk_id": "chunk_5131"
+  },
+  {
+    "text": "The T-bill rate is 4%.",
+    "predicted_role": "evidence",
+    "true_role": "topic",
+    "old_role": "evidence",
+    "chunk_id": "chunk_5523"
+  },
+  {
+    "text": "Value Line's analysts prepare forecasts of the performance of industry groups as well as of each firm.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_4108"
+  },
+  {
+    "text": "You will receive your annual bonus next month that you hope to invest in long-term corporate bonds.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_5523"
+  },
+  {
+    "text": "As the loans in the underlying pool make their interest payments, the proceeds are distributed to pay interest to each tranche in order of seniority.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_3484"
+  },
+  {
+    "text": "Although options can be  used  by  speculators  as  effectively leveraged stock positions, as in portfolio B, they also can be used by investors who desire to tailor their risk exposures in creative ways, as in portfolio C.",
+    "predicted_role": "interpretation",
+    "true_role": "explanation",
+    "old_role": "interpretation",
+    "chunk_id": "chunk_4840"
+  },
+  {
+    "text": "Even greater problems arise in the interpretation of the financial statements of foreign firms.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_4690"
+  },
+  {
+    "text": "Table  3.2  compares  stock purchases to short sales.",
+    "predicted_role": "topic",
+    "true_role": "irrelevant",
+    "old_role": "reference",
+    "chunk_id": "chunk_1026"
+  },
+  {
+    "text": "Lanni sells the software product to Microsoft, which will market it to the public under the Microsoft name.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_0720"
+  },
+  {
+    "text": "Notice the trade-off between the front-end loads versus 12b-1 charges in the choice between Class A and Class C shares.",
+    "predicted_role": "topic",
+    "true_role": "comparison",
+    "old_role": "comparison",
+    "chunk_id": "chunk_1168"
+  },
+  {
+    "text": "We will elaborate on the rules for portfolio return and risk in the following chapter.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_1592"
+  },
+  {
+    "text": "that are riskier (with higher standard deviations).",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_1670"
+  },
+  {
+    "text": "You want to identify the industries that will be most helped or hurt in a particular macroeconomic scenario.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_4067"
+  },
+  {
+    "text": "Figure 23.5 Yield spread between 10-year Treasury and Baa-rated corporate bonds",
+    "predicted_role": "topic",
+    "true_role": "irrelevant",
+    "old_role": "reference",
+    "chunk_id": "chunk_5640"
+  },
+  {
+    "text": "Recalculate your answer to part ( c ) if you believe in the liquidity preference theory and you believe that the liquidity premium is 1%.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "procedure",
+    "chunk_id": "chunk_3702"
+  },
+  {
+    "text": "The payoffs and profits to both writing calls and buying puts generally are higher when the stock price is lower.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_5021"
+  },
+  {
+    "text": "+  .5  ×  1.0)",
+    "predicted_role": "topic",
+    "true_role": "irrelevant",
+    "old_role": "irrelevant",
+    "chunk_id": "chunk_2708"
+  },
+  {
+    "text": "Revised (Posterior) Expectations / Step 5: Portfolio Optimization REFERENCES TO CFA PROBLEMS 995 GLOSSARY G-1 NAME INDEX I SUBJECT INDEX I-4 NOTATION, FORMULAS F-1",
+    "predicted_role": "procedure",
+    "true_role": "explanation",
+    "old_role": "procedure",
+    "chunk_id": "chunk_0383"
+  },
+  {
+    "text": "(See portable alpha. )",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_6937"
+  },
+  {
+    "text": "Moreover, it  would  not  be  surprising  to  find that the degree of efficiency differs across  various  markets.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_2836"
+  },
+  {
+    "text": "To summarize, a passive strategy involves investment in two passive portfolios: virtually risk-free short-term T-bills (or, alternatively, a money market fund) and a stock fund that mimics a broad market index.",
+    "predicted_role": "conclusion",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_1646"
+  },
+  {
+    "text": "Options / Futures Contracts Robo Advice / Blockchains / Cryptocurrencies / Digital Tokens / Digital Currency End of Chapter Material 56-60",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "formula",
+    "chunk_id": "chunk_0102"
+  },
+  {
+    "text": "bond A security issued by a borrower that obligates the issuer to make specified payments to the holder over a specific period.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "definition",
+    "chunk_id": "chunk_6947"
+  },
+  {
+    "text": "Superior measurement of the risk-free rate of return over historical time periods.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_2815"
+  },
+  {
+    "text": "Figure 20.3 Payoff and profit to call writer at expiration The solid line in Figure 20.4 plots the payoff at expiration on a FinCorp put with an",
+    "predicted_role": "explanation",
+    "true_role": "irrelevant",
+    "old_role": "reference",
+    "chunk_id": "chunk_4828"
+  },
+  {
+    "text": "Some of the most well-known management companies are  Fidelity,  Vanguard, and BlackRock.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_1155"
+  },
+  {
+    "text": "This is an example of investor underreaction to the information contained in accruals.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_2996"
+  },
+  {
+    "text": "If the levels of the scenario returns change, the intensity of the covariation also may change, as reflected by the magnitude of the product of deviations.",
+    "predicted_role": "explanation",
+    "true_role": "assumption",
+    "old_role": "assumption",
+    "chunk_id": "chunk_2156"
+  },
+  {
+    "text": "X is called the intrinsic value of in-the-money call options because it gives the payoff that could be obtained by immediate exercise.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_5040"
+  },
+  {
+    "text": "Investments",
+    "predicted_role": "explanation",
+    "true_role": "irrelevant",
+    "old_role": "irrelevant",
+    "chunk_id": "chunk_0019"
+  },
+  {
+    "text": "The bid-ask spread, the source of the dealer's profit, is .10% of notional principal each year.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_5654"
+  },
+  {
+    "text": "Fama and French propose a method to quantify the size risk premium.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_3183"
+  },
+  {
+    "text": "The balance sheet value of inventories is calculated as the cost of the goods still in inventory.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_4667"
+  },
+  {
+    "text": "Turnover is  the ratio of the trading activity of a portfolio to the assets of the portfolio.",
+    "predicted_role": "definition",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_1187"
+  },
+  {
+    "text": "Put bonds give the bondholder rather than the issuer the option to terminate or extend the life of the bond.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "conclusion",
+    "chunk_id": "chunk_3491"
+  },
+  {
+    "text": "This is the rate a taxable bond must offer to match the after-tax yield on the tax-free municipal.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_0787"
+  },
+  {
+    "text": "Stocks with a beta of zero offer an expected rate of return of zero.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "conclusion",
+    "chunk_id": "chunk_2600"
+  },
+  {
+    "text": "Profit is zero when the ultimate spot price, PT, equals the initial futures price, F 0 .",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_5376"
+  },
+  {
+    "text": "Price-Contingent  Orders Investors  also  may  place  orders  specifying  prices  at  which they are willing to buy or sell a security.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_0938"
+  },
+  {
+    "text": "limited liability The fact that shareholders have no personal liability to the creditors of the corporation in the event of bankruptcy.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "definition",
+    "chunk_id": "chunk_7017"
+  },
+  {
+    "text": "But an efficient market adherent would discount this track record, arguing that such a simplistic rule could not really generate abnormal returns, and that the CAPM may not be a good benchmark for returns in this case.",
+    "predicted_role": "example",
+    "true_role": "explanation",
+    "old_role": "example",
+    "chunk_id": "chunk_4638"
+  },
+  {
+    "text": "The purchase of a security with a commitment to purchase more of the same security at a specified future date.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_0894"
+  },
+  {
+    "text": "Notice  that  the  payoff  to  the  stock  is  the  ex-dividend  stock  price  plus  dividends received.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "procedure",
+    "chunk_id": "chunk_5062"
+  },
+  {
+    "text": "Re-upping investments with proceeds from previous funds can be viewed as analogous to reinvesting dividends.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_6285"
+  },
+  {
+    "text": "and 'only' 13% of her investment capital will be borrowed.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "topic",
+    "chunk_id": "chunk_1747"
+  },
+  {
+    "text": "Any alpha (i.e., an expected return beyond this benchmark risk premium) would be due to some nonmarket factor uncovered through security analysis.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_2322"
+  },
+  {
+    "text": "This implies that p = 1 + r f",
+    "predicted_role": "evidence",
+    "true_role": "interpretation",
+    "old_role": "formula",
+    "chunk_id": "chunk_5135"
+  },
+  {
+    "text": "interest rate parity relationship (theorem) The relation between spot and forward exchange rates and foreign and domestic interest rates that rules out arbitrage opportunities.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_6998"
+  },
+  {
+    "text": "Explain how some of the behavioral biases discussed in the chapter might contribute to the success of technical trading rules.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "reference",
+    "chunk_id": "chunk_3076"
+  },
+  {
+    "text": "This means that the effective duration will be a function of variables that would not matter to conventional duration, for example, the volatility of interest rates.",
+    "predicted_role": "explanation",
+    "true_role": "definition",
+    "old_role": "explanation",
+    "chunk_id": "chunk_3869"
+  },
+  {
+    "text": "which implies that r 3 = 1.07 3 /1.06 2 -1 = .09028 = 9.028%.",
+    "predicted_role": "topic",
+    "true_role": "interpretation",
+    "old_role": "formula",
+    "chunk_id": "chunk_3557"
+  },
+  {
+    "text": "Turnover ratios measure the percentage of a mutual fund's holdings that are replaced in a single year.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_2468"
+  },
+  {
+    "text": "The Standard & Poor's Composite 500 (S&P 500) stock index represents an improvement over the Dow Jones Averages in two ways.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_0850"
+  },
+  {
+    "text": "[ E ( rM )  -r f ].",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_2538"
+  },
+  {
+    "text": "If the value is negative, borrow in the United States, lend in the United Kingdom, and take a short position in pound futures.",
+    "predicted_role": "example",
+    "true_role": "assumption",
+    "old_role": "assumption",
+    "chunk_id": "chunk_5570"
+  },
+  {
+    "text": "The second, or payout, stage usually starts at retirement, when the investor typically has several options, including the following:",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_6756"
+  },
+  {
+    "text": "The first entry is for the nearest term or 'front' contract, with maturity in   September 2021.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_0882"
+  },
+  {
+    "text": "Carl Icahn.",
+    "predicted_role": "example",
+    "true_role": "irrelevant",
+    "old_role": "irrelevant",
+    "chunk_id": "chunk_0645"
+  },
+  {
+    "text": "Positive serial correlation means that positive returns tend to follow positive returns (a momentum type of property).",
+    "predicted_role": "evidence",
+    "true_role": "definition",
+    "old_role": "evidence",
+    "chunk_id": "chunk_2899"
+  },
+  {
+    "text": "While a market-neutral fund will have no sensitivity to an index for that market, it may have significant betas, or loading, on other factors, such as credit conditions.",
+    "predicted_role": "evidence",
+    "true_role": "example",
+    "old_role": "evidence",
+    "chunk_id": "chunk_6355"
+  },
+  {
+    "text": "The higher the ratio, the more of the security they will hold in the active portfolio.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_2341"
+  },
+  {
+    "text": "When portfolio returns are normally distributed, the VaR is fully determined by the mean and SD of the distribution.",
+    "predicted_role": "explanation",
+    "true_role": "assumption",
+    "old_role": "assumption",
+    "chunk_id": "chunk_1364"
+  },
+  {
+    "text": "The conversion premium is the excess of the bond's value over the conversion price.",
+    "predicted_role": "definition",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_6952"
+  },
+  {
+    "text": "626 PART V Security Analysis",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_4503"
+  },
+  {
+    "text": "Wilson remarks that the Rainbow portfolio has a higher expected return because it has greater nonsystematic risk than Eagle's portfolio.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "conclusion",
+    "chunk_id": "chunk_2619"
+  },
+  {
+    "text": "Do the same for  the  public  utility  industry  and  you  will  find  lower  rates  of  return,  lower  investment rates, and higher dividend payout rates.",
+    "predicted_role": "procedure",
+    "true_role": "explanation",
+    "old_role": "procedure",
+    "chunk_id": "chunk_4139"
+  },
+  {
+    "text": "diversifying  the  investments  of  the plan so as to   minimize the risk of large losses, unless under the   circumstances it is clearly prudent not to do so. . .",
+    "predicted_role": "evidence",
+    "true_role": "explanation",
+    "old_role": "evidence",
+    "chunk_id": "chunk_6215"
+  },
+  {
+    "text": "Table 16.4, Panel A, shows that if interest rates remain at 8%, the accumulated funds from the bond will grow to exactly the $14,693.28 obligation.",
+    "predicted_role": "evidence",
+    "true_role": "irrelevant",
+    "old_role": "reference",
+    "chunk_id": "chunk_3900"
+  },
+  {
+    "text": "exchanges Auction markets in which members congregate (physically or electronically) to trade securities.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_6983"
+  },
+  {
+    "text": "As with operating expenses, investors are not explicitly billed for 12b-1 charges.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_1166"
+  },
+  {
+    "text": "A trivial example of an arbitrage opportunity would arise if shares of a stock sold for different prices on two different exchanges.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_2677"
+  },
+  {
+    "text": "Covariance.",
+    "predicted_role": "explanation",
+    "true_role": "irrelevant",
+    "old_role": "irrelevant",
+    "chunk_id": "chunk_2018"
+  },
+  {
+    "text": "If the option were underpriced, one would simply reverse this arbitrage strategy:",
+    "predicted_role": "explanation",
+    "true_role": "assumption",
+    "old_role": "assumption",
+    "chunk_id": "chunk_5099"
+  },
+  {
+    "text": "Supply shocks are usually characterized by aggregate output moving in the opposite direction of inflation and interest rates.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_4066"
+  },
+  {
+    "text": "We begin by thinking about an insurance company selling many identical fire insurance policies.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "topic",
+    "chunk_id": "chunk_1971"
+  },
+  {
+    "text": "Finally, the value of debt in 2021 is subtracted from firm value to arrive at the intrinsic value of equity (cell K37), and value per share is calculated in cell L37 as equity value divided by number of shares.",
+    "predicted_role": "conclusion",
+    "true_role": "procedure",
+    "old_role": "procedure",
+    "chunk_id": "chunk_4424"
+  },
+  {
+    "text": "Such underpricing is reflected in price jumps that occur on the date when the shares are first traded in public security markets.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_0924"
+  },
+  {
+    "text": "The market value of the shareholders' equity investment equals the difference between the current values of all assets and liabilities.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "limitation",
+    "chunk_id": "chunk_4208"
+  },
+  {
+    "text": "The value of a put option on VT appears in Figure 21.13.",
+    "predicted_role": "topic",
+    "true_role": "reference",
+    "old_role": "reference",
+    "chunk_id": "chunk_5245"
+  },
+  {
+    "text": "Many of the important regulations  have  to  do  with  full  disclosure  of  relevant  information  concerning  the  securities  in question.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "old_role": "explanation",
+    "chunk_id": "chunk_1083"
+  }
+]

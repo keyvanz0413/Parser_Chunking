@@ -1,0 +1,810 @@
+[
+  {
+    "text": "This  text  can  help  you  become  an  informed practitioner  of  investments.",
+    "predicted_role": "explanation",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_0618",
+    "heading_path": "CHAPTER 1 > The Investment Environment"
+  },
+  {
+    "text": "One concern that complicates event studies arises from leakage of information.",
+    "predicted_role": "example",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_2880",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Example 11.4 Abnormal Returns"
+  },
+  {
+    "text": "Click on the News and Research link, then choose Mutual Funds from the submenu.",
+    "predicted_role": "procedure",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_2633",
+    "heading_path": "E-INVESTMENTS EXERCISES"
+  },
+  {
+    "text": "After 40 months, the best possible stock value is $100 × 1.03 40 = $326, for a total gain of 226%, but the worst possible outcome is $100 × .99 40 = $66.90, for a cumulative loss of 33.1%.",
+    "predicted_role": "formula",
+    "true_role": "evidence",
+    "correct": false,
+    "chunk_id": "chunk_1433",
+    "heading_path": "1.  NAV = $4,034.4 - $81.8 ________________ 101.1 = $39.10 > 5.8 Normality and Long-Term Investments *"
+  },
+  {
+    "text": "put-call parity theorem An equation representing the proper relation between put and call prices.",
+    "predicted_role": "definition",
+    "true_role": "formula",
+    "correct": false,
+    "chunk_id": "chunk_7046",
+    "heading_path": "L > Glossary"
+  },
+  {
+    "text": "term insurance Provides a death benefit only, with no buildup of cash value.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_7079",
+    "heading_path": "V > U"
+  },
+  {
+    "text": "Pricing with Storage Costs",
+    "predicted_role": "explanation",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_5685",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Pricing with Storage Costs"
+  },
+  {
+    "text": "Formulate the return objective of an investment policy statement for the Maclins.",
+    "predicted_role": "procedure",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_6891",
+    "heading_path": "INVESTMENT, RETURN, AND RISK OBJECTIVES > Table 28H"
+  },
+  {
+    "text": "We can view the process of asset allocation as consisting of the following steps:",
+    "predicted_role": "mechanism",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_6700",
+    "heading_path": "INVESTMENT, RETURN, AND RISK OBJECTIVES > 28.5 Asset Allocation"
+  },
+  {
+    "text": "Hong Kong is a case in point.",
+    "predicted_role": "explanation",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_4051",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > 17.1 The Global Economy"
+  },
+  {
+    "text": "Figure 18.1 Dividend growth for two earnings reinvestment policies The dividend of the company, therefore, will be $2 (40% of $5 earnings) instead of $5.",
+    "predicted_role": "reference",
+    "true_role": "irrelevant",
+    "correct": false,
+    "chunk_id": "chunk_4296",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Stock Prices and Investment Opportunities"
+  },
+  {
+    "text": "Security Analysis 551",
+    "predicted_role": "explanation",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_0214",
+    "heading_path": "PART V > Security Analysis 551"
+  },
+  {
+    "text": "The  point,  however,  is that with hundreds of market newsletters, you can find one that has stumbled onto an apparently remarkable string of successful  predictions without any real degree of skill.",
+    "predicted_role": "procedure",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_2893",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > How to Guarantee a Successful Market Newsletter"
+  },
+  {
+    "text": "Table 6.5 Points along indifference curve for investors with risk aversion of either A = 2 or A = 4.",
+    "predicted_role": "reference",
+    "true_role": "irrelevant",
+    "correct": false,
+    "chunk_id": "chunk_1629",
+    "heading_path": "SCORING YOUR RISK TOLERANCE > Example 6.4 Capital Allocation"
+  },
+  {
+    "text": "[ α A ╱  σ 2 ( e A )",
+    "predicted_role": "procedure",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_2349",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Summary of Optimization Procedure"
+  },
+  {
+    "text": "Investment companies perform several important functions for their investors:",
+    "predicted_role": "explanation",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_1125",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > 4.1 Investment Companies"
+  },
+  {
+    "text": "Concept Check 23.10",
+    "predicted_role": "explanation",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_5712",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Concept Check 23.10"
+  },
+  {
+    "text": "At  first  blush,  Kendall's  results  were  disturbing  to  some  financial  economists.",
+    "predicted_role": "assumption",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_2826",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > The Efficient Market Hypothesis 11"
+  },
+  {
+    "text": "implying that 1 + y 2 = 1.055.",
+    "predicted_role": "formula",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_3629",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Concept Check 15.7"
+  },
+  {
+    "text": "Figure 3.3 Displayed Market Depth (Dollar value of shares offered at best bid plus best ask price)",
+    "predicted_role": "reference",
+    "true_role": "irrelevant",
+    "correct": false,
+    "chunk_id": "chunk_0940",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Types of Orders"
+  },
+  {
+    "text": "Sector  allocation  within  the  equity  market  results  in  excess  performance  of  129  basis points, and security selection within sectors contributes 18 basis points.",
+    "predicted_role": "evidence",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_5954",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Summing Up Component Contributions"
+  },
+  {
+    "text": "Three important tax deferral options can meaningfully affect optimal asset allocation for individual investors.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_6733",
+    "heading_path": "INVESTMENT, RETURN, AND RISK OBJECTIVES > Tax Sheltering and Asset Allocation"
+  },
+  {
+    "text": "The firm is in the 21% tax bracket.",
+    "predicted_role": "explanation",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_0896",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > 58 PART I Introduction"
+  },
+  {
+    "text": "Financial assets can be categorized as fixed income, equity, or derivative instruments.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_0713",
+    "heading_path": "CHAPTER 1 > SUMMARY"
+  },
+  {
+    "text": "Example 26.3 VC Equity Share and Dilution",
+    "predicted_role": "example",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_6295",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Example 26.3 VC Equity Share and Dilution"
+  },
+  {
+    "text": "Several factors must be considered when choosing a brokerage firm to execute your trades.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_1109",
+    "heading_path": "E-INVESTMENTS EXERCISES"
+  },
+  {
+    "text": "After three years, one of the newsletters would have had a perfect prediction record.",
+    "predicted_role": "procedure",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_2893",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > How to Guarantee a Successful Market Newsletter"
+  },
+  {
+    "text": "The risk-free rate is 3%.",
+    "predicted_role": "evidence",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_1688",
+    "heading_path": "SCORING YOUR RISK TOLERANCE > PROBLEM SETS"
+  },
+  {
+    "text": "Var( r p ) = .10 × .10 × 26.25 + .10 × .30 × 8.91 + .10 × .40 × 5.52   /thinspace[/thinspacerow 1] + .30 × .10 × 8.91 + .30 × .30 × 15.98 + .30 × .40 × 12.16   /thinspace[/thinspacerow 2] + .40 × .10 × 5.52 + .40 × .30 × 12.16 + .40 × .40 × 9.38   /thinspace[/thinspacerow 3] = 7.096 Concept Check 7.1 asks you to explore the bordered covariance matrix a bit further.",
+    "predicted_role": "formula",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_1820",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECK > Example 7.1 Volatility of a Three-Asset Portfolio"
+  },
+  {
+    "text": "Because the right to exercise early may be useful in some circumstances, it will command a premium.",
+    "predicted_role": "evidence",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_5074",
+    "heading_path": "CHAPTER 21 > Early Exercise of American Puts"
+  },
+  {
+    "text": "Hold this stock as a single-stock portfolio.",
+    "predicted_role": "procedure",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_2631",
+    "heading_path": "E-INVESTMENTS EXERCISES > Forecast Returns, Standard Deviations, and Betas"
+  },
+  {
+    "text": "Recall  that  such  contracts  entail  delivery  or  acceptance  of  one  currency  for another at a stipulated exchange rate.",
+    "predicted_role": "procedure",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_6085",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Example 25.1 Exchange Rate Risk"
+  },
+  {
+    "text": "Recall the expres- sion for the square of the Sharpe ratio of the optimized risky portfolio:",
+    "predicted_role": "procedure",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_6537",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > A Model for the Estimation of Potential Fees"
+  },
+  {
+    "text": "The SML looks very similar, but it focuses on how expected return responds to beta.",
+    "predicted_role": "comparison",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_2520",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Concept Check 9.4"
+  },
+  {
+    "text": "Instead,  a stratified sampling or cellular approach is often pursued.",
+    "predicted_role": "explanation",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_3891",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Bond-Index Funds"
+  },
+  {
+    "text": "For  example,  a  January expiration call option on Microsoft stock with an exercise price of $280 entitles its owner to purchase Microsoft stock for a price of $280 at any time up to and including the expiration date.",
+    "predicted_role": "evidence",
+    "true_role": "example",
+    "correct": false,
+    "chunk_id": "chunk_0872",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Options"
+  },
+  {
+    "text": "Profit to long = Spot price at maturity - Original futures price Profit to short = Original futures price - Spot price at maturity where the spot price is the actual market price of the commodity at the time of the delivery.",
+    "predicted_role": "formula",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_5376",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > The Basics of Futures Contracts"
+  },
+  {
+    "text": "Risk premium on the S&P 500 portfolio.",
+    "predicted_role": "explanation",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_2327",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > The Single-Index Model Input List"
+  },
+  {
+    "text": "Use Spreadsheet 16.3 to test some of the rules for duration presented a few pages ago.",
+    "predicted_role": "reference",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_3839",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Concept Check 16.4"
+  },
+  {
+    "text": "1 Maurice Kendall,  'The  Analysis  of  Economic  Time  Series,  Part  I:  Prices,' Journal  of  the  Royal  Statistical Society 96 (1953).",
+    "predicted_role": "assumption",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_2826",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > The Efficient Market Hypothesis 11"
+  },
+  {
+    "text": "By construction, the common factor has zero expected value because it measures new information concerning the macroeconomy; new information implies a revision to current expectations, and if initial expectations are rational, then such revisions should average out to zero.",
+    "predicted_role": "explanation",
+    "true_role": "interpretation",
+    "correct": false,
+    "chunk_id": "chunk_2660",
+    "heading_path": "CHAPTER 10 > Factor Models of Security Returns"
+  },
+  {
+    "text": "Measures of Risk",
+    "predicted_role": "explanation",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_7198",
+    "heading_path": "I > Measures of Risk"
+  },
+  {
+    "text": "5 4 Using this  probability,  the  continuously  compounded  expected  rate  of  return  on  the  stock  is  .10.",
+    "predicted_role": "example",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_5131",
+    "heading_path": "CHAPTER 21 > Example 21.3 Increasing the Number of Subperiods"
+  },
+  {
+    "text": "Offer an arbitrage opportunity.",
+    "predicted_role": "procedure",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_2815",
+    "heading_path": "CHAPTER 10 > Use the following information to answer Problems 13 through 16:"
+  },
+  {
+    "text": "The T-bill rate is 4%.",
+    "predicted_role": "evidence",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_5523",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > PROBLEM SETS"
+  },
+  {
+    "text": "In  the 1900-2020 period, U.S. stocks outperformed bills by 7.7% per year versus average outperformance of only 5.3% outside the U.S. 15 On the other hand, Panel A of Figure 5.10 shows that several countries outperformed the United States, so by that standard, the U.S. was not exceptional.",
+    "predicted_role": "reference",
+    "true_role": "comparison",
+    "correct": false,
+    "chunk_id": "chunk_1428",
+    "heading_path": "1.  NAV = $4,034.4 - $81.8 ________________ 101.1 = $39.10 > A Global View of the Historical Record"
+  },
+  {
+    "text": "Although options can be  used  by  speculators  as  effectively leveraged stock positions, as in portfolio B, they also can be used by investors who desire to tailor their risk exposures in creative ways, as in portfolio C.",
+    "predicted_role": "interpretation",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_4840",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Option versus Stock Investments"
+  },
+  {
+    "text": "Table  3.2  compares  stock purchases to short sales.",
+    "predicted_role": "reference",
+    "true_role": "irrelevant",
+    "correct": false,
+    "chunk_id": "chunk_1026",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > 3.9 Short Sales"
+  },
+  {
+    "text": "The portfolio return over the month is 5.34%.",
+    "predicted_role": "procedure",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_5935",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > 24.5 Performance Attribution Procedures"
+  },
+  {
+    "text": "Figure 23.5 Yield spread between 10-year Treasury and Baa-rated corporate bonds",
+    "predicted_role": "reference",
+    "true_role": "irrelevant",
+    "correct": false,
+    "chunk_id": "chunk_5640",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Hedging Interest Rate Risk"
+  },
+  {
+    "text": "Recalculate your answer to part ( c ) if you believe in the liquidity preference theory and you believe that the liquidity premium is 1%.",
+    "predicted_role": "procedure",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_3702",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > PROBLEM SETS"
+  },
+  {
+    "text": "The onset of this",
+    "predicted_role": "explanation",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_3653",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Concept Check 15.8"
+  },
+  {
+    "text": "Revised (Posterior) Expectations / Step 5: Portfolio Optimization REFERENCES TO CFA PROBLEMS 995 GLOSSARY G-1 NAME INDEX I SUBJECT INDEX I-4 NOTATION, FORMULAS F-1",
+    "predicted_role": "procedure",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_0383",
+    "heading_path": "Chapter 27 > 27.3  The Black-Litterman Model 946"
+  },
+  {
+    "text": "The optimal risky portfolio with the analysts' new forecasts of alpha",
+    "predicted_role": "explanation",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_6442",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Spreadsheet 27.1"
+  },
+  {
+    "text": "These are examples of asset-backed securities.",
+    "predicted_role": "explanation",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_3305",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Innovation in the Bond Market"
+  },
+  {
+    "text": "Industries differ in their sensitivity to the business cycle.",
+    "predicted_role": "comparison",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_4151",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > SUMMARY"
+  },
+  {
+    "text": "Options / Futures Contracts Robo Advice / Blockchains / Cryptocurrencies / Digital Tokens / Digital Currency End of Chapter Material 56-60",
+    "predicted_role": "formula",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_0102",
+    "heading_path": "Chapter 1 > 2.5 Derivative Markets 54"
+  },
+  {
+    "text": "bond A security issued by a borrower that obligates the issuer to make specified payments to the holder over a specific period.",
+    "predicted_role": "definition",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_6947",
+    "heading_path": "C"
+  },
+  {
+    "text": "Level III CFA Study Guide 2-4.    1988 Level",
+    "predicted_role": "explanation",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_6924",
+    "heading_path": "Chapter 24"
+  },
+  {
+    "text": "Figure 20.3 Payoff and profit to call writer at expiration The solid line in Figure 20.4 plots the payoff at expiration on a FinCorp put with an",
+    "predicted_role": "reference",
+    "true_role": "irrelevant",
+    "correct": false,
+    "chunk_id": "chunk_4828",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Put Options"
+  },
+  {
+    "text": "Example 15.3 Holding-Period Returns on Zero-Coupon Bonds",
+    "predicted_role": "example",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_3565",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Example 15.3 Holding-Period Returns on Zero-Coupon Bonds"
+  },
+  {
+    "text": "Put bonds give the bondholder rather than the issuer the option to terminate or extend the life of the bond.",
+    "predicted_role": "conclusion",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_3491",
+    "heading_path": "= PRICE(DATE(2021,8,15), DATE(2049,8,15), .0225, .01938, 100, 2) > SUMMARY"
+  },
+  {
+    "text": "These  results  are  important.",
+    "predicted_role": "explanation",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_2582",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > 9.4 The CAPM and the Investment Industry"
+  },
+  {
+    "text": "Stocks with a beta of zero offer an expected rate of return of zero.",
+    "predicted_role": "conclusion",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_2600",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > SUMMARY"
+  },
+  {
+    "text": "limited liability The fact that shareholders have no personal liability to the creditors of the corporation in the event of bankruptcy.",
+    "predicted_role": "definition",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_7017",
+    "heading_path": "L"
+  },
+  {
+    "text": "But an efficient market adherent would discount this track record, arguing that such a simplistic rule could not really generate abnormal returns, and that the CAPM may not be a good benchmark for returns in this case.",
+    "predicted_role": "example",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_4638",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Example 19.4 Market-Price-to-Book-Value Ratio and Growth Options"
+  },
+  {
+    "text": "Notice  that  the  payoff  to  the  stock  is  the  ex-dividend  stock  price  plus  dividends received.",
+    "predicted_role": "procedure",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_5062",
+    "heading_path": "CHAPTER 21 > Restrictions on the Value of a Call Option"
+  },
+  {
+    "text": "Interest Rates and Inflation",
+    "predicted_role": "explanation",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_1289",
+    "heading_path": "1.  NAV = $4,034.4 - $81.8 ________________ 101.1 = $39.10 > Interest Rates and Inflation"
+  },
+  {
+    "text": "Standard deviation is calculated in cell G14 as",
+    "predicted_role": "explanation",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_1326",
+    "heading_path": "1.  NAV = $4,034.4 - $81.8 ________________ 101.1 = $39.10 > Spreadsheet 5.1"
+  },
+  {
+    "text": "Some of these issues arise from differences in firms' accounting procedures.",
+    "predicted_role": "explanation",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_4532",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Financial Statement Analysis 19"
+  },
+  {
+    "text": "and 'only' 13% of her investment capital will be borrowed.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_1747",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS"
+  },
+  {
+    "text": "Commodity-linked bear bond.",
+    "predicted_role": "explanation",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_4993",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > PROBLEM SETS"
+  },
+  {
+    "text": "This implies that p = 1 + r f",
+    "predicted_role": "formula",
+    "true_role": "interpretation",
+    "correct": false,
+    "chunk_id": "chunk_5135",
+    "heading_path": "CHAPTER 21 > A Risk-Neutral Shortcut"
+  },
+  {
+    "text": "Now  express  some  views  about  either  absolute  return  or  over/underperformance.",
+    "predicted_role": "explanation",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_6559",
+    "heading_path": "E-INVESTMENTS EXERCISES"
+  },
+  {
+    "text": "Justify each response with one reason.",
+    "predicted_role": "procedure",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_6819",
+    "heading_path": "INVESTMENT, RETURN, AND RISK OBJECTIVES > Table 28C"
+  },
+  {
+    "text": "Explain how some of the behavioral biases discussed in the chapter might contribute to the success of technical trading rules.",
+    "predicted_role": "reference",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_3076",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > KEY TERMS"
+  },
+  {
+    "text": "This means that the effective duration will be a function of variables that would not matter to conventional duration, for example, the volatility of interest rates.",
+    "predicted_role": "explanation",
+    "true_role": "definition",
+    "correct": false,
+    "chunk_id": "chunk_3869",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Duration and Convexity of Callable Bonds"
+  },
+  {
+    "text": "which implies that r 3 = 1.07 3 /1.06 2 -1 = .09028 = 9.028%.",
+    "predicted_role": "formula",
+    "true_role": "interpretation",
+    "correct": false,
+    "chunk_id": "chunk_3557",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Example 15.2 Finding a Future Short Rate"
+  },
+  {
+    "text": "The Class C shares have no front-end load.",
+    "predicted_role": "explanation",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_1224",
+    "heading_path": "1.  NAV = $4,034.4 - $81.8 ________________ 101.1 = $39.10"
+  },
+  {
+    "text": "Convertible bondholders benefit from price appreciation of the company's stock.",
+    "predicted_role": "explanation",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_3296",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Concept Check 14.1"
+  },
+  {
+    "text": "All the other data remain the same.",
+    "predicted_role": "explanation",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_2411",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > PROBLEM SETS"
+  },
+  {
+    "text": "End of Chapter Material 574-582",
+    "predicted_role": "explanation",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_0237",
+    "heading_path": "Chapter 15 > 15.5 Interpreting the Term Structure 495"
+  },
+  {
+    "text": "Buy a put option.",
+    "predicted_role": "procedure",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_0900",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > 58 PART I Introduction"
+  },
+  {
+    "text": "Concept Check 2.2",
+    "predicted_role": "explanation",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_0801",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Concept Check 2.2"
+  },
+  {
+    "text": "Show the alphas graphically.",
+    "predicted_role": "procedure",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_2519",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Concept Check 9.4"
+  },
+  {
+    "text": "We will look more systematically at these tests in Chapter 13.",
+    "predicted_role": "explanation",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_2578",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > 9.3 Issues in Testing the CAPM"
+  },
+  {
+    "text": "Positive serial correlation means that positive returns tend to follow positive returns (a momentum type of property).",
+    "predicted_role": "evidence",
+    "true_role": "definition",
+    "correct": false,
+    "chunk_id": "chunk_2899",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Weak-Form Tests: Patterns in Stock Returns"
+  },
+  {
+    "text": "While a market-neutral fund will have no sensitivity to an index for that market, it may have significant betas, or loading, on other factors, such as credit conditions.",
+    "predicted_role": "evidence",
+    "true_role": "example",
+    "correct": false,
+    "chunk_id": "chunk_6355",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Style Analysis"
+  },
+  {
+    "text": "This asymmetry gives rise to the skewness of the distribution.",
+    "predicted_role": "example",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_5131",
+    "heading_path": "CHAPTER 21 > Example 21.3 Increasing the Number of Subperiods"
+  },
+  {
+    "text": "Wilson remarks that the Rainbow portfolio has a higher expected return because it has greater nonsystematic risk than Eagle's portfolio.",
+    "predicted_role": "conclusion",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_2619",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > SUMMARY"
+  },
+  {
+    "text": "Venture Capital",
+    "predicted_role": "explanation",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_6278",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Venture Capital"
+  },
+  {
+    "text": "Do the same for  the  public  utility  industry  and  you  will  find  lower  rates  of  return,  lower  investment rates, and higher dividend payout rates.",
+    "predicted_role": "procedure",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_4139",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Industry Life Cycles"
+  },
+  {
+    "text": "Continuing with the example in the text, if the interest rate originally is 10%, the 30-year zero will be issued at a price of $1,000/1.10 30 = $57.31.",
+    "predicted_role": "example",
+    "true_role": "evidence",
+    "correct": false,
+    "chunk_id": "chunk_3430",
+    "heading_path": "= PRICE(DATE(2021,8,15), DATE(2049,8,15), .0225, .01938, 100, 2) > Example 14.12 Taxation of Original-Issue-Discount Bonds"
+  },
+  {
+    "text": "diversifying  the  investments  of  the plan so as to   minimize the risk of large losses, unless under the   circumstances it is clearly prudent not to do so. . .",
+    "predicted_role": "evidence",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_6215",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > ERISA and the Growth of Alternative Asset Funds"
+  },
+  {
+    "text": "Market orders entail greater time-of-execution uncertainty than limit orders.",
+    "predicted_role": "explanation",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_1090",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > PROBLEM SETS"
+  },
+  {
+    "text": "They are not personally liable for the firm's obligations.",
+    "predicted_role": "explanation",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_0815",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Characteristics of Common Stock"
+  },
+  {
+    "text": "Table 16.4, Panel A, shows that if interest rates remain at 8%, the accumulated funds from the bond will grow to exactly the $14,693.28 obligation.",
+    "predicted_role": "reference",
+    "true_role": "irrelevant",
+    "correct": false,
+    "chunk_id": "chunk_3900",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Immunization"
+  },
+  {
+    "text": "These too were reviewed in Chapter 2.",
+    "predicted_role": "explanation",
+    "true_role": "topic",
+    "correct": false,
+    "chunk_id": "chunk_3301",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Other Domestic Issuers"
+  },
+  {
+    "text": "In that case, we would have P 1 = V 1 = $52, and",
+    "predicted_role": "formula",
+    "true_role": "evidence",
+    "correct": false,
+    "chunk_id": "chunk_4290",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Convergence of Price to Intrinsic Value"
+  },
+  {
+    "text": "We begin by thinking about an insurance company selling many identical fire insurance policies.",
+    "predicted_role": "topic",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_1971",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECK > Risk Sharing versus Risk Pooling"
+  },
+  {
+    "text": "The market value of the shareholders' equity investment equals the difference between the current values of all assets and liabilities.",
+    "predicted_role": "limitation",
+    "true_role": "explanation",
+    "correct": false,
+    "chunk_id": "chunk_4208",
+    "heading_path": "SOLUTIONS TO CONCEPT CHECKS > Limitations of Book Value"
+  }
+]
