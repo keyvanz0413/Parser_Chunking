@@ -108,6 +108,49 @@ class ChunkingConfig:
     # Role-driven chunking signals
     CHUNK_START_ROLES = {'topic', 'question'}     # Roles that signal new chunk start
     CHUNK_CONTINUE_ROLES = {'interpretation', 'conclusion', 'evidence'}  # Prefer merging
+    
+    # ==========================================================================
+    # Block-level Role Smoothing Settings (v2.3 Upgrade)
+    # ==========================================================================
+    
+    ENABLE_ROLE_SMOOTHING = True                  # Toggle block-level smoothing
+    
+    # Majority voting settings
+    SMOOTHING_MAJORITY_THRESHOLD = 0.80           # 80%+ consensus triggers smoothing
+    SMOOTHING_LOW_CONFIDENCE_THRESHOLD = 0.6      # Sentences below this are "soft" targets
+    
+    # Window smoothing settings
+    SMOOTHING_WINDOW_SIZE = 1                     # Look at S_{i-1} and S_{i+1}
+    SMOOTHING_NEIGHBOR_CONFIDENCE = 0.5           # Min neighbor confidence for window smoothing
+    
+    # Semantic flow constraints (HMM-style allowed transitions)
+    # Format: role -> set of valid successor roles
+    ROLE_FLOW_PATHS = {
+        'topic': {'definition', 'assumption', 'mechanism', 'example', 'explanation'},
+        'definition': {'example', 'mechanism', 'application', 'limitation', 'explanation'},
+        'assumption': {'mechanism', 'procedure', 'example', 'explanation'},
+        'mechanism': {'example', 'application', 'evidence', 'interpretation', 'explanation'},
+        'procedure': {'example', 'evidence', 'interpretation', 'conclusion', 'explanation'},
+        'example': {'interpretation', 'evidence', 'conclusion', 'comparison', 'explanation'},
+        'evidence': {'interpretation', 'conclusion', 'comparison', 'explanation'},
+        'interpretation': {'conclusion', 'application', 'comparison', 'explanation'},
+        'comparison': {'conclusion', 'interpretation', 'explanation'},
+        'conclusion': {'application', 'explanation'},
+        'application': {'example', 'conclusion', 'explanation'},
+        'limitation': {'example', 'conclusion', 'explanation'},
+        'explanation': {'definition', 'example', 'mechanism', 'procedure', 'evidence', 
+                       'interpretation', 'conclusion', 'comparison', 'application', 'explanation'},
+    }
+    
+    # Chunk-type to role affinity mapping (for chunk-level smoothing)
+    CHUNK_TYPE_ROLE_AFFINITY = {
+        'procedure': {'procedure', 'example', 'evidence'},
+        'example': {'example', 'evidence', 'interpretation'},
+        'definition': {'definition', 'mechanism', 'explanation'},
+        'theorem': {'definition', 'mechanism', 'explanation'},
+        'proof': {'procedure', 'mechanism', 'evidence'},
+        'list': {'procedure', 'example', 'evidence'},
+    }
 
 
 
@@ -122,6 +165,11 @@ class SentenceRole:
     role: str  # topic, definition, example, conclusion, evidence, procedural, imperative
     pos_tags: List[str] = field(default_factory=list)
     is_imperative: bool = False
+    # v2.3: Smoothing metadata
+    semantic_confidence: float = 1.0     # Confidence score from semantic matching (0.0-1.0)
+    original_role: Optional[str] = None  # Role before smoothing (None if not smoothed)
+    was_smoothed: bool = False           # True if role was modified by smoothing
+    smoothing_reason: str = ""           # Reason for smoothing (majority_vote, window, flow_constraint)
 
 
 @dataclass
@@ -315,13 +363,13 @@ class SemanticAnalyzer:
             return False
     
     def _compute_role_embeddings(self):
-        """Pre-compute embeddings for role prototypes."""
-        logger.info("Computing role prototype embeddings...")
+        """Pre-compute embeddings for role prototypes (Multi-sample version)."""
+        logger.info("Computing multi-sample role prototype embeddings...")
         for role, sentences in self.ROLE_PROTOTYPES.items():
             embeddings = self._model.encode(sentences)
-            # Use mean embedding as role centroid
-            self._role_embeddings[role] = self._np.mean(embeddings, axis=0)
-        logger.info(f"Computed embeddings for {len(self._role_embeddings)} roles")
+            # Store all embeddings for multi-point matching (Prototypical Support Set)
+            self._role_embeddings[role] = embeddings
+        logger.info(f"Computed multi-sample embeddings for {len(self._role_embeddings)} roles")
     
     def encode_sentences(self, sentences: List[str]) -> Optional[Any]:
         """
@@ -417,16 +465,10 @@ class SemanticAnalyzer:
     
     def refine_role_by_semantics(self, sentence: str, current_role: str) -> Tuple[str, float]:
         """
-        Refine sentence role using semantic similarity to role prototypes.
+        Refine sentence role using Max-similarity prototypical matching.
         
-        This is used when rule-based detection returns 'explanation' (uncertain).
-        
-        Args:
-            sentence: The sentence text
-            current_role: Role assigned by rule-based system
-            
-        Returns:
-            Tuple of (refined_role, confidence_score)
+        Instead of comparing against a single mean centroid, it compares against
+        all samples in the support set and takes the maximum similarity.
         """
         if not self._lazy_init() or not self.config.ENABLE_PROTOTYPE_MATCHING:
             return current_role, 0.0
@@ -438,19 +480,32 @@ class SemanticAnalyzer:
         # Encode the sentence
         sentence_embedding = self._model.encode([sentence])[0]
         
-        # Compare against all role prototypes
+        # Compare against all role prototype sets
         best_role = current_role
         best_score = 0.0
         
-        for role, prototype_embedding in self._role_embeddings.items():
-            similarity = self.compute_similarity(sentence_embedding, prototype_embedding)
-            if similarity > best_score:
-                best_score = similarity
+        for role, support_matrix in self._role_embeddings.items():
+            # support_matrix: (n_samples, embed_dim)
+            # sentence_embedding: (embed_dim,)
+            
+            # Compute similarities with all samples in this role's support set
+            # Using dot product for efficiency since embeddings are typically normalized by SBERT
+            # If not, cosine_similarity would be safer
+            similarities = []
+            for sample_emb in support_matrix:
+                sim = self.compute_similarity(sentence_embedding, sample_emb)
+                similarities.append(sim)
+            
+            # Take the maximum similarity (nearest sample logic)
+            max_sim = max(similarities) if similarities else 0.0
+            
+            if max_sim > best_score:
+                best_score = max_sim
                 best_role = role
         
         # Only refine if score exceeds threshold
         if best_score >= self.config.ROLE_PROTOTYPE_SIMILARITY_THRESHOLD:
-            logger.debug(f"Refined role '{current_role}' -> '{best_role}' (score: {best_score:.2f})")
+            logger.debug(f"Refined role '{current_role}' -> '{best_role}' (max_score: {best_score:.2f})")
             return best_role, best_score
         
         return current_role, best_score
@@ -959,31 +1014,35 @@ class CaptionBondingHelper:
         # Check against block caption patterns
         for pattern in self._caption_patterns:
             match = pattern.match(text)
-            if match:
-                caption_id = match.group(1)
+            if match or seg.get('type') == 'Caption':
+                # If matched by regex, it's definitely a caption
+                # If marked as 'Caption' by Docling, trust it even if regex doesn't match perfectly
+                caption_id = match.group(1) if match else "unknown"
                 
-                # Filter out descriptive sentences that reference figures but aren't captions
-                # True captions are typically:
-                # 1. Short (under 100 chars for first sentence)
-                # 2. Don't contain common descriptive verbs right after the figure number
-                first_sentence = text.split('.')[0] if '.' in text else text
-                text_after_id = text[match.end():].strip().lower()
+                # If it's a Docling Caption but no regex match, it might just be the title text
+                # If it is a regex match, check for descriptive verbs to filter out references
+                if match:
+                    # Filter out descriptive sentences that reference figures but aren't captions
+                    # True captions are typically:
+                    # 1. Short (under 100 chars for first sentence)
+                    # 2. Don't contain common descriptive verbs right after the figure number
+                    text_after_id = text[match.end():].strip().lower()
+                    
+                    # Check for descriptive verb patterns (not a caption)
+                    descriptive_verbs = ['shows', 'presents', 'displays', 'illustrates', 
+                                        'depicts', 'demonstrates', 'provides', 'contains',
+                                        'compares', 'summarizes', 'lists', 'is a', 'is the',
+                                        'plots', 'graphs', 'charts', 'traces', 'reports',
+                                        'is an', 'was', 'were', 'has', 'have', 'gives',
+                                        'indicates', 'reveals', 'suggests', 'confirms']
+                    is_descriptive = any(text_after_id.startswith(verb) for verb in descriptive_verbs)
+                    
+                    # If it starts with a descriptive verb, it's a reference sentence, not a caption
+                    # EXCEPT if Docling explicitly labeled it as a Caption
+                    if is_descriptive and seg.get('type') != 'Caption':
+                        continue  # Skip this pattern, it's likely a reference mention
                 
-                # Check for descriptive verb patterns (not a caption)
-                # True captions never start with verbs like "shows", "presents", etc.
-                descriptive_verbs = ['shows', 'presents', 'displays', 'illustrates', 
-                                    'depicts', 'demonstrates', 'provides', 'contains',
-                                    'compares', 'summarizes', 'lists', 'is a', 'is the',
-                                    'plots', 'graphs', 'charts', 'traces', 'reports',
-                                    'is an', 'was', 'were', 'has', 'have', 'gives',
-                                    'indicates', 'reveals', 'suggests', 'confirms']
-                is_descriptive = any(text_after_id.startswith(verb) for verb in descriptive_verbs)
-                
-                # If it starts with a descriptive verb, it's a reference sentence, not a caption
-                if is_descriptive:
-                    continue  # Skip this pattern, not a true caption
-                
-                # Infer target type from pattern
+                # Infer target type from pattern or default to Paragraph
                 target_type = self._infer_target_type(text)
                 
                 self._stats["captions_detected"] += 1
@@ -994,7 +1053,20 @@ class CaptionBondingHelper:
                     "caption_text": text,
                     "target_type": target_type,
                     "full_caption_id": f"{target_type} {caption_id}",
+                    "is_explicit_caption": seg.get('type') == 'Caption'
                 }
+        
+        # Fallback for Docling Captions that don't match standard patterns (e.g. just raw text in a caption block)
+        if seg.get('type') == 'Caption':
+            self._stats["captions_detected"] += 1
+            return True, {
+                "is_block_caption": True,
+                "caption_id": "unknown",
+                "caption_text": text,
+                "target_type": self._infer_target_type(text),
+                "full_caption_id": "Caption",
+                "is_explicit_caption": True
+            }
         
         return False, {}
     
@@ -2082,7 +2154,7 @@ class POSAnalyzer:
             ]
         }
     
-    def analyze_sentences(self, text: str, heading_path: str = "") -> List[Dict[str, Any]]:
+    def analyze_sentences(self, text: str, heading_path: str = "", is_caption: bool = False) -> List[Dict[str, Any]]:
         """
         Analyze text and return sentences with roles.
         
@@ -2091,24 +2163,7 @@ class POSAnalyzer:
         Args:
             text: The text to analyze
             heading_path: The heading path for context (e.g., "Chapter 1 > Examples")
-        
-        Roles (15 types):
-        - topic: Introduces main idea
-        - definition: Concept definitions
-        - example: Examples and illustrations
-        - evidence: Data, statistics, measurements (NEW)
-        - formula: Mathematical expressions
-        - procedure: Step-by-step instructions
-        - mechanism: How something works
-        - assumption: Prerequisites/conditions
-        - interpretation: Explaining meaning
-        - limitation: Constraints/boundaries
-        - comparison: Comparing concepts
-        - application: Practical use cases
-        - reference: Figure/Table references
-        - conclusion: Summary statements
-        - explanation: Default explanatory content
-        - irrelevant: Low semantic value
+            is_caption: Whether this text is known to be a figure/table caption
         """
         if self.nlp is None:
             raise RuntimeError("POSAnalyzer.nlp is None. This should not happen if initialization passed.")
@@ -2148,7 +2203,8 @@ class POSAnalyzer:
                 is_first=(i == 0),
                 is_last=(i == total_sentences - 1),
                 form=form,
-                prev_role=prev_role  # NEW: Pass context
+                prev_role=prev_role,
+                is_caption=is_caption  # Pass flag
             )
             
             # v2.0: Semantic refinement for uncertain roles
@@ -2249,15 +2305,12 @@ class POSAnalyzer:
                         is_imperative: bool, heading_hint: Optional[str] = None,
                         relative_pos: float = 0.5, is_first: bool = False,
                         is_last: bool = False, form: str = "declarative",
-                        prev_role: Optional[str] = None) -> str:
+                        prev_role: Optional[str] = None, is_caption: bool = False) -> str:
         """
         Determine sentence role/function with enhanced context awareness.
         
-        v2.1 Improvements (based on confusion matrix analysis):
-        - Relaxed topic detection (was 2% recall, now targeting 50%+)
-        - Tighter procedure detection (avoid false positives from imperatives)
-        - Better distinction between reference and irrelevant (figure captions)
-        - Reordered priority to reduce topic->explanation errors
+        v2.1 Improvements:
+        - Use is_caption flag (from Docling/Bonding) to distinguish captions from references.
         """
         text_lower = text.lower()
         text_stripped = text.strip()
@@ -2299,18 +2352,27 @@ class POSAnalyzer:
                     if not re.search(r"^(?:Because|Since|Although|While|If|When|Whereas|However|Therefore|Thus|Moreover)\\b", text):
                         is_topic_candidate = True
                 
-        # ============ REFERENCE vs FIGURE CAPTION (v2.2: Better distinction) ============
-        # Figure/Table CAPTIONS (start with Figure X) should not be marked as reference
-        # Only mark as reference when text MENTIONS a figure/table in passing
+        # ============ REFERENCE vs FIGURE CAPTION (v2.3: Structural context) ============
+        # v2.3 Logic: 
+        # 1. If we KNOW it's a caption segment (from Docling/Bonding), role is explanation/topic.
+        # 2. If it's NOT a caption but mentions a Figure, it's a reference.
         if candidate_role == "explanation" or candidate_role == "irrelevant":
-            # Caption pattern: "Figure X.Y Title..." - this is NOT a reference, it's a caption/description
-            if re.match(r'^(?:Figure|Table|Exhibit|Chart)\s+\d+(?:\.\d+)?(?:\s+[A-Z]|$)', text):
-                candidate_role = "explanation"  # Keep as explanation (it describes the figure)
-            # Reference patterns: text mentions figure/table in context
-            elif re.search(r"(?:see|shown\s+in|as\s+in|from|per|refer\s+to)\s+(?:Figure|Table|Exhibit)\s+\d", text, re.I):
-                candidate_role = "reference"
-            elif re.search(r"(?:Figure|Table|Exhibit)\s+\d+\s+(?:shows|presents|illustrates|displays|summarizes)", text):
-                candidate_role = "reference"
+            if is_caption:
+                # Explicitly marked as caption - describe the figure
+                candidate_role = "explanation"
+                # If first sentence and contains Figure/Table, could also be 'topic' of the figure segment
+                if is_first and re.search(r'^(?:Figure|Table|Exhibit|Chart)\s+\d', text):
+                    candidate_role = "topic"
+            else:
+                # Not a caption segment - check if it's an in-text reference mention
+                # Use stricter patterns for in-text citations to avoid misidentifying captions as references
+                if re.search(r"(?:see|shown\s+in|as\s+in|from|per|refer\s+to|illustrated\s+in)\s+(?:Figure|Table|Exhibit)\s+\d", text, re.I):
+                    candidate_role = "reference"
+                elif re.search(r"(?:Figure|Table|Exhibit)\s+\d+\s+(?:shows|presents|illustrates|displays|summarizes)", text):
+                    candidate_role = "reference"
+                # Captions usually start with "Figure X", references often have "Figure X" in the middle or end
+                elif re.search(r"\((?:see\s+)?(?:Figure|Table|Exhibit)\s+\d+(?:\.\d+)?\)", text):
+                    candidate_role = "reference"
         
         # ============ ASSUMPTION (Scenario Setup) ============
         if candidate_role == "explanation":
@@ -3707,7 +3769,9 @@ class LogicSegmenter:
         # Analyze sentences with POS (enhanced with heading context)
         sentences = []
         if self.pos_analyzer and full_text:
-            sentences = self.pos_analyzer.analyze_sentences(full_text, heading_path)
+            # v2.3: Check if this chunk contains a caption segment
+            is_caption_chunk = any(s.get('is_block_caption', False) or s.get('type') == 'Caption' for s in segments)
+            sentences = self.pos_analyzer.analyze_sentences(full_text, heading_path, is_caption=is_caption_chunk)
         
         # Determine chunk type if not provided
         if chunk_type is None:
@@ -3884,7 +3948,7 @@ if __name__ == "__main__":
     
     # Base directory for the project
     base_dir = Path(__file__).parent.parent
-    input_dir = base_dir / "outputs" / "docling_json"
+    input_dir = base_dir / "outputs" / "Docling_json"
     output_dir = base_dir / "outputs" / "Chunks_sbert"
     output_dir.mkdir(parents=True, exist_ok=True)
     

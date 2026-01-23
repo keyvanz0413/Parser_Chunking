@@ -173,6 +173,8 @@ class EnhancedParser:
         if any(h in label for h in self.HEADING_LABELS) and not any(n in label for n in self.NOISE_LABELS):
             return "Header"
         
+        if "caption" in label: return "Caption"
+        
         name = type(item).__name__.lower()
         if "table" in name: return "Table"
         if "list" in name: return "ListItem"
@@ -695,7 +697,7 @@ if __name__ == "__main__":
     # Base directory for the project
     base_dir = Path(__file__).parent.parent
     input_dir = base_dir / "inputs"
-    output_dir = base_dir / "outputs" / "docling_json"
+    output_dir = base_dir / "outputs" / "Docling_json"
     output_dir.mkdir(parents=True, exist_ok=True)
     
     if not input_dir.exists():
