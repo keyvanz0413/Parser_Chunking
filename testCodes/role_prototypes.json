@@ -1,0 +1,123 @@
+{
+  "version": "2.0",
+  "description": "Role prototype sentences for semantic role classification. Each role has example sentences that represent typical patterns. The SemanticAnalyzer uses these to compute embeddings and match uncertain sentences.",
+  "prototypes": {
+    "definition": {
+      "description": "Formal definitions of concepts, terms, or entities",
+      "examples": [
+        "A bond is a financial instrument that represents a loan made by an investor.",
+        "The yield to maturity is defined as the internal rate of return of the bond.",
+        "Duration measures the sensitivity of bond price to interest rate changes.",
+        "The term 'arbitrage' refers to the simultaneous purchase and sale of an asset.",
+        "A derivative is a financial contract whose value is derived from an underlying asset."
+      ]
+    },
+    "assumption": {
+      "description": "Prerequisites, conditions, or hypothetical scenarios",
+      "examples": [
+        "Assume that the interest rate remains constant over the investment period.",
+        "Let us suppose that the market is efficient and all information is reflected in prices.",
+        "Given that inflation is zero, the nominal rate equals the real rate.",
+        "Suppose the investor has a risk-free investment opportunity available.",
+        "Under the assumption of no transaction costs, the arbitrage condition holds."
+      ]
+    },
+    "limitation": {
+      "description": "Constraints, caveats, or boundaries of applicability",
+      "examples": [
+        "This model does not account for transaction costs or taxes.",
+        "The analysis is limited to the case where default risk is negligible.",
+        "One caveat is that liquidity may vary significantly across different securities.",
+        "The results only apply to investment-grade bonds and may not generalize.",
+        "This approach fails when market conditions become highly volatile."
+      ]
+    },
+    "mechanism": {
+      "description": "Explanations of how something works or processes operate",
+      "examples": [
+        "When interest rates rise, bond prices fall because the present value decreases.",
+        "The arbitrage mechanism ensures that prices converge to their fair value.",
+        "Duration works by measuring the weighted average time of cash flows.",
+        "The central bank influences short-term rates through open market operations.",
+        "Price discovery occurs through the interaction of buyers and sellers in the market."
+      ]
+    },
+    "procedure": {
+      "description": "Step-by-step instructions or methodologies",
+      "examples": [
+        "First, calculate the present value of each cash flow. Then sum all values.",
+        "To compute the yield, solve the equation iteratively until convergence.",
+        "Follow these steps: enter the data, run the model, and interpret results.",
+        "Begin by identifying the relevant cash flows, then discount each to present value.",
+        "Step 1: Gather the required inputs. Step 2: Apply the formula. Step 3: Verify the result."
+      ]
+    },
+    "evidence": {
+      "description": "Data, statistics, empirical findings, or measurements",
+      "examples": [
+        "The correlation coefficient was 0.85, indicating a strong positive relationship.",
+        "Returns increased by 15% over the sample period from 2010 to 2020.",
+        "Statistical analysis shows p < 0.05, rejecting the null hypothesis.",
+        "The average yield was 4.5% with a standard deviation of 1.2%.",
+        "Historical data indicates that credit spreads widen during recessions by an average of 200 basis points."
+      ]
+    },
+    "example": {
+      "description": "Illustrative instances, case studies, or demonstrations",
+      "examples": [
+        "For instance, consider a 10-year bond with a 5% coupon rate.",
+        "An example would be the 2008 financial crisis when credit spreads widened.",
+        "To illustrate, suppose an investor purchases $1,000 worth of Treasury bonds.",
+        "Consider the case of a company issuing convertible bonds to raise capital.",
+        "As an illustration, let's examine a portfolio with equal weights in stocks and bonds."
+      ]
+    },
+    "interpretation": {
+      "description": "Explanations of meaning, implications, or significance",
+      "examples": [
+        "This means that investors are willing to accept lower returns for safety.",
+        "In other words, the market is pricing in a higher probability of default.",
+        "The implication is that portfolio diversification reduces overall risk.",
+        "This result suggests that interest rate risk is the dominant factor.",
+        "What this indicates is that the model captures the essential dynamics accurately."
+      ]
+    },
+    "conclusion": {
+      "description": "Summary statements, takeaways, or final recommendations",
+      "examples": [
+        "In conclusion, duration matching is an effective immunization strategy.",
+        "Therefore, we recommend a barbell strategy for this interest rate environment.",
+        "The key takeaway is that credit risk dominates during economic downturns.",
+        "To summarize, diversification remains the most reliable risk management tool.",
+        "In summary, the evidence supports a cautious approach to credit exposure."
+      ]
+    },
+    "comparison": {
+      "description": "Comparative statements between concepts or entities",
+      "examples": [
+        "Unlike stocks, bonds provide fixed income streams to investors.",
+        "Compared to Treasury bonds, corporate bonds offer higher yields but more risk.",
+        "The longer-duration portfolio outperformed the shorter-duration one.",
+        "In contrast to passive strategies, active management requires higher fees.",
+        "Whereas government bonds are considered risk-free, corporate bonds carry default risk."
+      ]
+    },
+    "application": {
+      "description": "Practical use cases or real-world implementations",
+      "examples": [
+        "This technique is commonly used by pension funds to match liabilities.",
+        "In practice, traders use this model for pricing interest rate swaps.",
+        "Portfolio managers apply this framework when constructing fixed income portfolios.",
+        "The method is widely adopted in the insurance industry for asset-liability management.",
+        "Real-world applications include hedging strategies and risk assessment."
+      ]
+    }
+  },
+  "usage_notes": [
+    "These prototypes are embedded using Sentence-BERT and stored as mean vectors per role.",
+    "When a sentence role is uncertain (classified as 'explanation'), it is compared against all role prototypes.",
+    "If the cosine similarity exceeds the threshold (default 0.75), the role is refined to the best matching prototype.",
+    "To add domain-specific prototypes, append new examples to the relevant role category.",
+    "For new roles, add a new key with description and at least 3 example sentences."
+  ]
+}
