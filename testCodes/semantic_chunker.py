@@ -1655,6 +1655,21 @@ class POSAnalyzer:
         r'\b\d+\s*(?:bps|bp)\b',         # Basis points
     ]
     
+    # Bloom's Taxonomy Verbs for Learning Objectives
+    BLOOM_LO_VERBS = {
+        # Remember/Understand
+        'list', 'describe', 'state', 'identify', 'name', 'label', 'recall', 'select', 'match',
+        'explain', 'clarify', 'discuss', 'report', 'review', 'summarize', 'illustrate',
+        # Apply/Analyze
+        'apply', 'implement', 'solve', 'use', 'compute', 'calculate', 'estimate', 'demonstrate',
+        'analyze', 'differentiate', 'distinguish', 'compare', 'contrast', 'examine',
+        # Evaluate/Create
+        'evaluate', 'assess', 'judge', 'appraise', 'defend', 'justify', 'critique',
+        'create', 'design', 'formulate', 'compose', 'construct', 'develop', 'derive',
+        # Additional instructional verbs
+        'specify', 'understand', 'outline', 'point'
+    }
+    
     def __init__(self, model_name: str = "en_core_web_md"):
         global nlp
         if nlp is None:
@@ -1794,6 +1809,42 @@ class POSAnalyzer:
         
         return sentences
     
+    def pre_analyze_role(self, text: str) -> Optional[str]:
+        """
+        Quickly pre-analyze a segment's role using keyword and POS heuristics.
+        Used for early role detection to influence chunking/adsorption.
+        """
+        if not text or len(text.strip()) < 5:
+            return None
+            
+        text_lower = text.lower().strip()
+        
+        # 1. LO Pattern: "learning objectives", "by the end of this...", etc.
+        lo_markers = [
+            r'\blearning\s+objectives?\b',
+            r'\bat\s+the\s+end\s+of\b',
+            r'\byou\s+will\s+be\s+able\s+to\b',
+            r'\bafter\s+studying\b'
+        ]
+        for pattern in lo_markers:
+            if re.search(pattern, text_lower):
+                return 'learning_objective'
+                
+        # 2. Verb-Initial LO: "Specify...", "Calculate...", etc.
+        # Use simple split for speed, if it starts with a Bloom verb
+        words = text_lower.split()
+        if words and words[0] in self.BLOOM_LO_VERBS:
+            # Check length to avoid short noise like "Explain" as a header
+            if len(words) > 3:
+                return 'learning_objective'
+                
+        # 3. Structural Header types
+        if re.match(r'^(?:Table|Figure|Exhibit|Equation|Formula)\s*\d+', text, re.IGNORECASE):
+            # These are handled by CaptionBondingHelper usually, but good to have
+            return None
+            
+        return None
+
     def _get_heading_hint(self, heading_path: str) -> Optional[str]:
         """Extract role hint from heading path."""
         if not heading_path:
@@ -2624,10 +2675,26 @@ class LogicSegmenter:
         merge_evidences = []  # Collect all evidence for this buffer
         
         for i, seg in enumerate(segments):
+            seg_text = seg.get('text', '')
             seg_type = seg.get('type', 'Paragraph')
             heading_path = seg.get('heading_path', '')
             is_continuation = seg.get('is_continuation', 'none')
             continuation_evidence = seg.get('continuation_evidence', {})
+            
+            # Phase 1: Semantic Role Pre-analysis (Role-First)
+            discourse_role = self.pos_analyzer.pre_analyze_role(seg_text) if self.pos_analyzer else None
+            
+            # If POS predicts LO but Docling says Paragraph, trust POS for grouping
+            if discourse_role == 'learning_objective' and seg_type == 'Paragraph':
+                seg_type = 'LearningObjective'
+                seg['inferred_role'] = 'learning_objective'
+                logger.debug(f"Role-First: Overriding Paragraph -> LearningObjective for {seg.get('segment_id')}")
+            
+            # Determine if buffer currently contains a "Master" block that can adsorb
+            buffer_is_lo = buffer and (buffer[-1].get('type') == 'LearningObjective' or buffer[-1].get('inferred_role') == 'learning_objective')
+            buffer_is_header = buffer and buffer[-1].get('type') == 'Header'
+            can_adsorb = buffer_is_lo or buffer_is_header
+
             
             # =================================================================
             # Rule 0: Cross-page continuation handling with evidence
@@ -2721,6 +2788,13 @@ class LogicSegmenter:
             # Rule 2: ListItems should be grouped together
             # =================================================================
             if seg_type == 'ListItem':
+                # Rule 2a: Adsorption - if buffer is an LO or Header, adsorb the list
+                if can_adsorb and heading_path == current_heading_path:
+                    buffer.append(seg)
+                    logger.debug(f"Adsorption: ListItem {seg.get('segment_id')} adsorbed into active {buffer[-1].get('type')} buffer")
+                    continue
+
+                # Rule 2b: Standard List Item grouping
                 # If buffer has non-list items, flush first
                 if buffer and buffer[-1].get('type') != 'ListItem':
                     chunk = self._create_chunk(buffer, current_heading_path)
@@ -2849,10 +2923,11 @@ class LogicSegmenter:
                 continue
             
             # =================================================================
-            # Rule 4.5: Learning Objectives are standalone chunks
+            # Rule 4.5: Group consecutive LearningObjectives under same heading
             # =================================================================
             if seg_type == 'LearningObjective':
-                if buffer:
+                # If buffer has non-LO content OR heading changed, flush first
+                if buffer and (buffer[-1].get('type') != 'LearningObjective' or buffer[-1].get('heading_path', '') != heading_path):
                     chunk = self._create_chunk(buffer, current_heading_path)
                     chunk.is_cross_page = has_cross_page
                     chunk.continuation_type = continuation_type
@@ -2863,8 +2938,35 @@ class LogicSegmenter:
                     has_cross_page = False
                     continuation_type = "none"
                     merge_evidences = []
-                chunks.append(self._create_chunk([seg], heading_path, chunk_type="learning_objective"))
+                    # Update current_heading_path for the upcoming LOs
+                    current_heading_path = heading_path
+                
+                if not buffer:
+                    current_heading_path = heading_path
+                    
+                buffer.append(seg)
                 continue
+
+            # =================================================================
+            # Rule 4.6: Flush LearningObjectives sequence if next is different
+            # =================================================================
+            if buffer and buffer[-1].get('type') == 'LearningObjective' and seg_type != 'LearningObjective':
+                # Rule 4.7: Soft Adsorption - allow one trailing Paragraph if it looks like content
+                if seg_type == 'Paragraph' and len(seg_text.split()) < 50 and heading_path == current_heading_path:
+                     buffer.append(seg)
+                     logger.debug(f"Soft Adsorption: Small paragraph {seg.get('segment_id')} added to LO chunk")
+                     continue
+
+                chunk = self._create_chunk(buffer, current_heading_path, chunk_type="learning_objective")
+                chunk.is_cross_page = has_cross_page
+                chunk.continuation_type = continuation_type
+                chunk.needs_review = (continuation_type == 'partial')
+                chunk.merge_evidence = self._compile_merge_evidence(merge_evidences)
+                chunks.append(chunk)
+                buffer = []
+                has_cross_page = False
+                continuation_type = "none"
+                merge_evidences = []
             
             # =================================================================
             # Rule 5: Check for theorem/proof block starters
@@ -3097,6 +3199,39 @@ class LogicSegmenter:
             if i in skip_indices:
                 continue
             
+            # Phase 1.8: Learning Objective + List regrouping (Hard Regrouping)
+            # Handle case where LO header was separated from its list
+            if (chunk.chunk_type == 'learning_objective' or 
+                (self.pos_analyzer and self.pos_analyzer.pre_analyze_role(chunk.content.split('\n')[0]) == 'learning_objective')):
+                
+                # Check if the next chunk is a list or unbonded explanation
+                for j in range(i + 1, min(len(bonded_chunks), i + 3)):
+                    if j in skip_indices:
+                        continue
+                    next_chunk = bonded_chunks[j]
+                    
+                    # Merge if it's a list or a short explanation under the same heading
+                    should_merge = False
+                    if next_chunk.chunk_type == 'list':
+                        should_merge = True
+                    elif next_chunk.chunk_type == 'explanation' and next_chunk.word_count < 100:
+                        should_merge = True
+                        
+                    if should_merge and next_chunk.heading_path == chunk.heading_path:
+                        # Hard Merge: combine content and markers
+                        chunk.content += "\n" + next_chunk.content
+                        chunk.source_segments.extend(next_chunk.source_segments)
+                        chunk.sentences.extend(next_chunk.sentences)
+                        chunk.tags = list(set(chunk.tags + next_chunk.tags))
+                        chunk.chunk_type = 'learning_objective' 
+                        chunk.word_count = len(chunk.content.split())
+                        skip_indices.add(j)
+                        logger.info(f"Hard Regrouping: LO Header merged with {next_chunk.chunk_type} (chunk_{j})")
+                        # Keep looking if there's more to adsorb
+                        continue
+                    else:
+                        break
+
             # If this is an unbonded Table/Picture, check if the next chunk is its Caption
             if chunk.chunk_type in ['table', 'picture', 'formula'] and not chunk.merge_evidence.get('bonded'):
                 # Look ahead for a Caption
@@ -3318,6 +3453,9 @@ class LogicSegmenter:
         # Check segment types first
         if all(t == 'ListItem' for t in seg_types):
             return "list"
+        
+        if all(t == 'LearningObjective' for t in seg_types):
+            return "learning_objective"
         
         # Check for theorem/proof (highest priority for academic content)
         if "theorem" in tags:

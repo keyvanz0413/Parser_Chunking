@@ -89,6 +89,33 @@ class ChunkingConfig:
     ENABLE_DEHYPHENATION = True              # Enable cross-page hyphen repair
     
     # ==========================================================================
+    # Sidebar Detection Settings (v3.0 Upgrade - Structural Isolation)
+    # ==========================================================================
+    
+    ENABLE_SIDEBAR_DETECTION = True           # Enable sidebar/floating block detection
+    SIDEBAR_WIDTH_RATIO_MAX = 0.35            # Max width ratio for sidebar (35% of page)
+    SIDEBAR_MIN_X_GAP = 30.0                  # Minimum x-gap between main and sidebar content
+    SIDEBAR_ISOLATION_STRICT = True           # If True, sidebars NEVER merge with main text
+    
+    # Sidebar heading patterns (indicate sidebar content)
+    SIDEBAR_HEADING_PATTERNS = [
+        r'(?i)^(?:chapter\s+)?objectives?',
+        r'(?i)^learning\s+objectives?',
+        r'(?i)^key\s+(?:terms?|points?|takeaways?|concepts?)',
+        r'(?i)^summary',
+        r'(?i)^highlights?',
+        r'(?i)^(?:quick\s+)?review',
+        r'(?i)^(?:in\s+)?this\s+chapter',
+        r'(?i)^(?:margin(?:al)?|side)\s*(?:note|box)?',
+    ]
+    
+    # Learning objective detection patterns (Textbook imperative verbs)
+    LEARNING_OBJECTIVE_PATTERNS = [
+        r'(?i)^(?:describe|explain|understand|identify|define|compare|calculate|evaluate|analyze|apply|discuss|list|summarize|provide|address|reacquaint|outline|review|introduce|show|demonstrate|determine|examine|evaluate|survey)\s+',
+        r'(?i)^(?:LO|LOS|Learning\s+(?:Objective|Outcome))\s*\d*',
+    ]
+    
+    # ==========================================================================
     # Semantic Analysis Settings (v2.0 Upgrade)
     # ==========================================================================
     
@@ -772,6 +799,361 @@ class FurnitureDetector:
         if re.match(r'^[ivxlcdmIVXLCDM]+$', text):
             return True
         return False
+    
+    def get_stats(self) -> Dict[str, int]:
+        """Return detection statistics."""
+        return self._stats.copy()
+
+
+# =============================================================================
+# Sidebar Detector (v3.0 - Structural Isolation for Learning Objectives)
+# =============================================================================
+
+class SidebarDetector:
+    """
+    Sidebar/Floating Block Detection for Structural Isolation.
+    
+    Addresses the critical issue where sidebar content (Learning Objectives,
+    Key Terms, Chapter Summaries) gets incorrectly merged with main column
+    paragraphs due to spatial proximity.
+    
+    Detection Strategy:
+    1. **Column Clustering**: Analyze bbox x-coordinates per page to identify
+       distinct column zones (main column vs sidebar)
+    2. **Width Analysis**: Sidebars typically have narrower width than main column
+    3. **Content Pattern Matching**: Sidebar headings often match specific patterns
+       (e.g., "CHAPTER OBJECTIVES", "KEY TERMS")
+    4. **List Structure Detection**: Imperative list items under sidebar headings
+    
+    Output:
+    - Each segment gets 'is_sidebar', 'sidebar_zone', and 'sidebar_heading' flags
+    - Sidebar segments are FORBIDDEN from merging with main column chunks
+    
+    Usage:
+        detector = SidebarDetector(config)
+        detector.analyze_page(page_segments)  # Build column structure
+        for seg in segments:
+            if detector.is_sidebar(seg):
+                seg['is_sidebar'] = True
+                seg['sidebar_zone'] = detector.get_sidebar_zone(seg)
+    """
+    
+    def __init__(self, config: ChunkingConfig = None):
+        self.config = config or ChunkingConfig()
+        
+        # Compile patterns
+        self._heading_patterns = [
+            re.compile(p) for p in self.config.SIDEBAR_HEADING_PATTERNS
+        ]
+        self._lo_patterns = [
+            re.compile(p) for p in self.config.LEARNING_OBJECTIVE_PATTERNS
+        ]
+        
+        # Page-level statistics (populated by scan_document)
+        self._page_columns: Dict[int, Dict[str, Any]] = {}  # page -> column info
+        self._sidebar_headings: Dict[int, List[str]] = {}   # page -> list of sidebar heading texts
+        self._scanned = False
+        
+        # Statistics
+        self._stats = {
+            "sidebars_detected": 0,
+            "learning_objectives_detected": 0,
+            "pages_with_sidebars": 0,
+            "sidebar_items": 0,
+        }
+    
+    def scan_document(self, segments: List[Dict]) -> None:
+        """
+        First pass: Analyze document structure to detect sidebar zones.
+        
+        Algorithm:
+        1. Group segments by page
+        2. For each page, cluster x-coordinates to identify column zones
+        3. Identify the "main column" (widest zone) vs "sidebar zones"
+        4. Detect sidebar headings by pattern matching
+        """
+        from collections import defaultdict
+        
+        # Group by page
+        pages: Dict[int, List[Dict]] = defaultdict(list)
+        for seg in segments:
+            pages[seg.get('page', 1)].append(seg)
+        
+        for page_num, page_segs in pages.items():
+            column_info = self._analyze_page_columns(page_segs)
+            self._page_columns[page_num] = column_info
+            
+            # Check for sidebar headings
+            sidebar_headings = []
+            for seg in page_segs:
+                text = seg.get('text', '').strip()
+                if self._is_sidebar_heading(text):
+                    sidebar_headings.append(text)
+                    seg['_is_sidebar_heading'] = True
+            
+            if sidebar_headings:
+                self._sidebar_headings[page_num] = sidebar_headings
+                self._stats['pages_with_sidebars'] += 1
+        
+        self._scanned = True
+        logger.info(f"SidebarDetector scanned {len(pages)} pages, "
+                   f"found sidebars on {self._stats['pages_with_sidebars']} pages")
+    
+    def _analyze_page_columns(self, page_segs: List[Dict]) -> Dict[str, Any]:
+        """
+        Analyze a page's segments to detect column structure.
+        
+        Returns:
+            Dict with:
+            - 'main_zone': (x_min, x_max) of main column
+            - 'sidebar_zones': List of (x_min, x_max, side) for sidebars
+            - 'is_multi_column': Whether page has sidebar structure
+        """
+        # Collect bbox info
+        x_ranges = []
+        page_width = self.config.PAGE_WIDTH_DEFAULT
+        
+        for seg in page_segs:
+            bbox = seg.get('bbox')
+            if not bbox or len(bbox) < 4:
+                continue
+            x_left, x_right = bbox[0], bbox[2]
+            width = x_right - x_left
+            x_ranges.append({
+                'left': x_left,
+                'right': x_right,
+                'width': width,
+                'center': (x_left + x_right) / 2,
+                'segment': seg
+            })
+            # Update page width estimate
+            if x_right > page_width * 0.9:
+                page_width = max(page_width, x_right * 1.05)
+        
+        if not x_ranges:
+            return {'main_zone': (0, page_width), 'sidebar_zones': [], 'is_multi_column': False}
+        
+        # Calculate width statistics
+        widths = [r['width'] for r in x_ranges]
+        avg_width = sum(widths) / len(widths)
+        max_width = max(widths)
+        
+        # Identify main column: segments with width > 50% of max
+        main_segs = [r for r in x_ranges if r['width'] > max_width * 0.5]
+        sidebar_segs = [r for r in x_ranges if r['width'] <= max_width * self.config.SIDEBAR_WIDTH_RATIO_MAX]
+        
+        if not main_segs:
+            main_segs = x_ranges
+        
+        # Calculate main zone
+        main_left = min(r['left'] for r in main_segs)
+        main_right = max(r['right'] for r in main_segs)
+        main_zone = (main_left, main_right)
+        
+        # Identify sidebar zones (narrow content outside main zone)
+        sidebar_zones = []
+        for r in sidebar_segs:
+            # Check if clearly separated from main zone
+            if r['right'] < main_left - self.config.SIDEBAR_MIN_X_GAP:
+                sidebar_zones.append((r['left'], r['right'], 'left'))
+            elif r['left'] > main_right + self.config.SIDEBAR_MIN_X_GAP:
+                sidebar_zones.append((r['left'], r['right'], 'right'))
+        
+        # Also check for right-side narrow columns even if overlapping
+        # (common in textbooks where sidebar is on far right)
+        right_edge_threshold = page_width * 0.65
+        for r in x_ranges:
+            width_ratio = r['width'] / page_width
+            if (r['left'] > right_edge_threshold and 
+                width_ratio < self.config.SIDEBAR_WIDTH_RATIO_MAX and
+                self._is_sidebar_heading(r['segment'].get('text', ''))):
+                if not any(sz[2] == 'right' for sz in sidebar_zones):
+                    sidebar_zones.append((r['left'], page_width, 'right'))
+                break
+        
+        is_multi_column = len(sidebar_zones) > 0 or len(set(
+            'left' if r['center'] < page_width * 0.45 else 'right' 
+            for r in x_ranges
+        )) > 1
+        
+        return {
+            'main_zone': main_zone,
+            'sidebar_zones': sidebar_zones,
+            'is_multi_column': is_multi_column,
+            'page_width': page_width,
+        }
+    
+    def _is_sidebar_heading(self, text: str) -> bool:
+        """Check if text matches a sidebar heading pattern."""
+        if not text:
+            return False
+        for pattern in self._heading_patterns:
+            if pattern.search(text.strip()):
+                return True
+        return False
+    
+    def _is_learning_objective(self, text: str) -> bool:
+        """Check if text is a learning objective item."""
+        if not text:
+            return False
+        for pattern in self._lo_patterns:
+            if pattern.match(text.strip()):
+                return True
+        return False
+    
+    def is_sidebar(self, seg: Dict) -> bool:
+        """
+        Determine if a segment is sidebar content.
+        
+        Detection rules (in priority order):
+        1. If marked as sidebar heading -> True
+        2. If under a sidebar heading in same heading_path -> True
+        3. If bbox is in detected sidebar zone -> True
+        4. If narrow + isolated on page edge -> True
+        """
+        if not self.config.ENABLE_SIDEBAR_DETECTION:
+            return False
+        
+        # Rule 1: Already marked as sidebar heading
+        if seg.get('_is_sidebar_heading'):
+            self._stats['sidebars_detected'] += 1
+            return True
+        
+        # Rule 2: Check heading_path for sidebar keywords
+        heading_path = seg.get('heading_path', '').upper()
+        for hp in ['OBJECTIVES', 'KEY TERMS', 'KEY POINTS', 'TAKEAWAY', 'SUMMARY', 'HIGHLIGHTS']:
+            if hp in heading_path:
+                self._stats['sidebar_items'] += 1
+                # Also check if it's a learning objective
+                if self._is_learning_objective(seg.get('text', '')):
+                    self._stats['learning_objectives_detected'] += 1
+                return True
+        
+        # Rule 3: Check if in sidebar zone
+        page = seg.get('page', 1)
+        column_info = self._page_columns.get(page, {})
+        sidebar_zones = column_info.get('sidebar_zones', [])
+        
+        if sidebar_zones:
+            bbox = seg.get('bbox')
+            if bbox and len(bbox) >= 4:
+                seg_center = (bbox[0] + bbox[2]) / 2
+                for zone_left, zone_right, side in sidebar_zones:
+                    if zone_left <= seg_center <= zone_right:
+                        self._stats['sidebars_detected'] += 1
+                        return True
+        
+        # Rule 4: Narrow + edge position + matches LO pattern
+        bbox = seg.get('bbox')
+        text = seg.get('text', '')
+        if bbox and len(bbox) >= 4:
+            page_width = column_info.get('page_width', self.config.PAGE_WIDTH_DEFAULT)
+            seg_width = bbox[2] - bbox[0]
+            width_ratio = seg_width / page_width
+            
+            if (width_ratio < self.config.SIDEBAR_WIDTH_RATIO_MAX and
+                self._is_learning_objective(text)):
+                self._stats['learning_objectives_detected'] += 1
+                return True
+        
+        return False
+    
+    def get_sidebar_zone(self, seg: Dict) -> Optional[str]:
+        """
+        Get the sidebar zone identifier for a segment.
+        
+        Returns:
+            'left', 'right', or None
+        """
+        page = seg.get('page', 1)
+        column_info = self._page_columns.get(page, {})
+        sidebar_zones = column_info.get('sidebar_zones', [])
+        
+        if not sidebar_zones:
+            # Check heading path
+            heading_path = seg.get('heading_path', '').upper()
+            for hp in ['OBJECTIVES', 'KEY TERMS', 'KEY POINTS']:
+                if hp in heading_path:
+                    return 'sidebar'  # Generic sidebar marker
+            return None
+        
+        bbox = seg.get('bbox')
+        if not bbox or len(bbox) < 4:
+            return None
+        
+        seg_center = (bbox[0] + bbox[2]) / 2
+        for zone_left, zone_right, side in sidebar_zones:
+            if zone_left <= seg_center <= zone_right:
+                return side
+        
+        return None
+    
+    def annotate_segments(self, segments: List[Dict]) -> List[Dict]:
+        """
+        Annotate all segments with sidebar information.
+        
+        Adds to each segment:
+        - 'is_sidebar': True if sidebar content
+        - 'sidebar_zone': 'left', 'right', or None
+        - 'sidebar_type': 'learning_objective', 'key_term', 'summary', or None
+        """
+        if not self._scanned:
+            self.scan_document(segments)
+        
+        current_sidebar_heading = None
+        current_sidebar_page = -1
+        
+        for seg in segments:
+            # Reset sidebar context on page change
+            page = seg.get('page', 1)
+            if page != current_sidebar_page:
+                # Keep context if heading_path still contains sidebar marker
+                heading_path = seg.get('heading_path', '').upper()
+                if not any(hp in heading_path for hp in ['OBJECTIVES', 'KEY TERMS', 'SUMMARY']):
+                    current_sidebar_heading = None
+            
+            # Check if this is a sidebar heading
+            text = seg.get('text', '').strip()
+            if self._is_sidebar_heading(text):
+                current_sidebar_heading = text
+                current_sidebar_page = page
+                seg['is_sidebar'] = True
+                seg['sidebar_zone'] = self.get_sidebar_zone(seg) or 'sidebar'
+                seg['sidebar_type'] = 'heading'
+                seg['forbid_merge_to_main'] = True
+                continue
+            
+            # Check if sidebar content
+            if self.is_sidebar(seg):
+                seg['is_sidebar'] = True
+                seg['sidebar_zone'] = self.get_sidebar_zone(seg) or 'sidebar'
+                seg['forbid_merge_to_main'] = True
+                
+                # Determine sidebar type
+                heading_path_upper = seg.get('heading_path', '').upper()
+                is_obj_path = any(hp in heading_path_upper for hp in ['OBJECTIVES', 'OUTCOMES'])
+                
+                if self._is_learning_objective(text):
+                    seg['sidebar_type'] = 'learning_objective'
+                elif is_obj_path and len(text.split()) > 3:
+                    # In an Objectives section, almost everything that's not a short label is an objective
+                    # even if it starts with 'This chapter...' or other non-traditional verbs
+                    seg['sidebar_type'] = 'learning_objective'
+                elif 'KEY' in heading_path_upper:
+                    seg['sidebar_type'] = 'key_term'
+                elif 'SUMMARY' in heading_path_upper:
+                    seg['sidebar_type'] = 'summary'
+                else:
+                    seg['sidebar_type'] = 'sidebar_content'
+            else:
+                seg['is_sidebar'] = False
+                seg['sidebar_zone'] = None
+                seg['sidebar_type'] = None
+                seg['forbid_merge_to_main'] = False
+        
+        logger.info(f"SidebarDetector annotated: {self._stats['sidebars_detected']} sidebars, "
+                   f"{self._stats['learning_objectives_detected']} learning objectives")
+        return segments
     
     def get_stats(self) -> Dict[str, int]:
         """Return detection statistics."""
@@ -3002,6 +3384,9 @@ class LogicSegmenter:
         self._semantic_analyzer = None
         if self.config.ENABLE_SEMANTIC_ANALYSIS:
             self._semantic_analyzer = SemanticAnalyzer(self.config)
+        
+        # v3.0: Initialize SidebarDetector for structural isolation
+        self.sidebar_detector = SidebarDetector(self.config) if self.config.ENABLE_SIDEBAR_DETECTION else None
     
     def process_file(self, input_json_path: str, output_path: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -3040,6 +3425,15 @@ class LogicSegmenter:
             continuation_count = sum(1 for s in flat_segments if s.get('is_continuation') != 'none')
             logger.info(f"Detected {continuation_count} cross-page continuations")
         
+        # v3.0: Annotate segments with sidebar information for structural isolation
+        sidebar_stats = {}
+        if self.sidebar_detector:
+            flat_segments = self.sidebar_detector.annotate_segments(flat_segments)
+            sidebar_stats = self.sidebar_detector.get_stats()
+            sidebar_count = sum(1 for s in flat_segments if s.get('is_sidebar'))
+            logger.info(f"Detected {sidebar_count} sidebar segments "
+                       f"({sidebar_stats.get('learning_objectives_detected', 0)} learning objectives)")
+        
         # Build block catalog for reference detection
         self.block_catalog = self.reference_detector.build_block_catalog(flat_segments)
         logger.info(f"Built block catalog: {len(self.block_catalog['by_segment_id'])} blocks, "
@@ -3075,10 +3469,16 @@ class LogicSegmenter:
         if self.config.ENABLE_PROTOTYPE_MATCHING:
             features.append("role_prototype_matching")
         
+        # v3.0: Sidebar detection feature
+        if self.config.ENABLE_SIDEBAR_DETECTION:
+            features.append("sidebar_isolation")
+        
         # Calculate stats and include corrector stats
         processing_stats = self._calculate_stats(chunks)
         if corrector_stats:
             processing_stats['reading_order_correction'] = corrector_stats
+        if sidebar_stats:
+            processing_stats['sidebar_detection'] = sidebar_stats
         
         result = {
             "metadata": {
@@ -3155,6 +3555,65 @@ class LogicSegmenter:
                     continuation_type = "none"
                     merge_evidences = []
                 continue
+            
+            # =================================================================
+            # Rule 0.5: Sidebar Isolation (v3.0)
+            # =================================================================
+            # Sidebar content (Learning Objectives, Key Terms, etc.) should NEVER
+            # be merged with main column text. Each sidebar item becomes its own chunk.
+            is_sidebar = seg.get('is_sidebar', False)
+            forbid_merge = seg.get('forbid_merge_to_main', False)
+            
+            if is_sidebar and self.config.SIDEBAR_ISOLATION_STRICT:
+                # First, flush any non-sidebar content in buffer
+                non_sidebar_buffer = [s for s in buffer if not s.get('is_sidebar', False)]
+                sidebar_buffer = [s for s in buffer if s.get('is_sidebar', False)]
+                
+                if non_sidebar_buffer:
+                    chunk = self._create_chunk(non_sidebar_buffer, current_heading_path)
+                    chunk.is_cross_page = has_cross_page
+                    chunk.continuation_type = continuation_type
+                    chunk.needs_review = (continuation_type == 'partial')
+                    chunk.merge_evidence = self._compile_merge_evidence(merge_evidences)
+                    chunks.append(chunk)
+                
+                # Flush any previous sidebar buffer as its own chunk
+                if sidebar_buffer:
+                    sidebar_type = sidebar_buffer[0].get('sidebar_type', 'sidebar_content')
+                    chunk_type = 'learning_objective' if sidebar_type == 'learning_objective' else 'sidebar'
+                    chunk = self._create_chunk(sidebar_buffer, sidebar_buffer[0].get('heading_path', ''), chunk_type=chunk_type)
+                    chunk.merge_evidence = {"sidebar_isolated": True, "sidebar_type": sidebar_type}
+                    chunks.append(chunk)
+                
+                # Start new sidebar buffer with current segment
+                buffer = [seg]
+                has_cross_page = False
+                continuation_type = "none"
+                merge_evidences = []
+                
+                # Check if we should create chunk immediately (for certain sidebar types)
+                sidebar_type = seg.get('sidebar_type', '')
+                if sidebar_type == 'learning_objective':
+                    # Each LO should be its own chunk for better retrieval
+                    chunk_type = 'learning_objective'
+                    chunk = self._create_chunk([seg], heading_path, chunk_type=chunk_type)
+                    chunk.merge_evidence = {"sidebar_isolated": True, "sidebar_type": sidebar_type}
+                    chunks.append(chunk)
+                    buffer = []
+                
+                continue
+            
+            # If buffer contains sidebar but current is not sidebar, flush sidebar first
+            if buffer and buffer[-1].get('is_sidebar', False) and not is_sidebar:
+                sidebar_type = buffer[0].get('sidebar_type', 'sidebar_content')
+                chunk_type = 'learning_objective' if sidebar_type == 'learning_objective' else 'sidebar'
+                chunk = self._create_chunk(buffer, buffer[0].get('heading_path', ''), chunk_type=chunk_type)
+                chunk.merge_evidence = {"sidebar_isolated": True, "sidebar_type": sidebar_type}
+                chunks.append(chunk)
+                buffer = []
+                has_cross_page = False
+                continuation_type = "none"
+                merge_evidences = []
             
             # =================================================================
             # Rule 1: Headers - with Caption Bonding logic

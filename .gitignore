@@ -37,3 +37,5 @@ ENV/
 # Project Specific
 *.log
 audit_sample*.json
+outputs/
+inputs/*.pdf
