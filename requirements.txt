@@ -10,6 +10,7 @@ spacy>=3.7.0
 # Utilities
 pathlib
 typing-extensions
+pymupdf
 
 # Installation Instructions:
 # -------------------------

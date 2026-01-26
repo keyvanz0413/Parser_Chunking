@@ -1,5 +1,6 @@
 import json
 import re
+import os
 import logging
 from typing import List, Dict, Any, Optional
 from dataclasses import asdict
@@ -21,7 +22,10 @@ from .toc_parser import TOCParser
 from .special_blocks import GlossaryDetector
 from .analyzers.kg_linker import KGLinker
 from .analyzers.chunk_factory import ChunkFactory
+from .analyzers.logic_book import LogicBook
 from .utils.metrics import MetricsCollector
+
+from .analyzers.structure import BookStructureAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +52,7 @@ class LogicSegmenter:
         )
         
         self.structural_heading_path = ""
+        self.structure_analyzer = None
     
     def process_file(self, input_json_path: str, output_path: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -60,45 +65,108 @@ class LogicSegmenter:
         
         flat_segments = data.get('flat_segments', [])
         metadata = data.get('metadata', {})
+        source_file = metadata.get('source_file', '')
         
-        logger.info(f"Loaded {len(flat_segments)} segments")
+        # Initialize Structure Analyzer if PDF exists
+        # Navigate from Semantic_chunker/segmenter.py up to Parser_Chunking/inputs/
+        base_path = Path(__file__).resolve().parent.parent
+        pdf_path = base_path / "inputs" / source_file
         
-        # 1. Detect TOC Pages
-        toc_pages = self.toc_parser.detect_pages(flat_segments)
-        
-        # 2. Parse TOC Structure (Strict Seeding)
-        toc_entries = self.toc_parser.parse(flat_segments, toc_pages)
-        if toc_entries:
-            flat_segments = self.toc_parser.apply_skeleton(flat_segments, toc_entries)
+        if pdf_path.exists():
+            pdf_path_str = str(pdf_path)
+            self.structure_analyzer = BookStructureAnalyzer(pdf_path_str)
+        else:
+            self.structure_analyzer = None
+            logger.warning(f"PDF not found at {pdf_path}. Skipping structure analysis.")
 
-        # 3. Detect Glossary Pages (NEW)
-        glossary_pages = self.glossary_detector.detect_glossary_pages(flat_segments)
-        if glossary_pages:
-            logger.info(f"Detected Glossary on pages: {sorted(list(glossary_pages))}")
-
-        # 4. Content Gating
-        gating_info = None
-        if self.config.ENABLE_CONTENT_GATING:
-            gatekeeper = ContentGatekeeper(self.config)
-            gating_info = gatekeeper.analyze(flat_segments, detected_toc_pages=toc_pages)
-            if gating_info.get('start_id'):
-                logger.info("Main Body Gating: Active for this document")
-
-        # 4. Reading Order Correction
         if (self.config.ENABLE_READING_ORDER_CORRECTION or 
             self.config.ENABLE_HEADING_RECONSTRUCTION or 
             self.config.ENABLE_BACKFILL_CORRECTION):
-            flat_segments = self.reading_order_corrector.process(flat_segments, gating_info)
+            flat_segments = self.reading_order_corrector.process(flat_segments, None)
             corrector_stats = self.reading_order_corrector.get_stats()
         else:
             corrector_stats = {}
+
+        # 4.5 Structure Analysis & TOC Seeding (AUTHORITATIVE)
+        glossary_pages = set()
+        if self.structure_analyzer:
+            self.structure = self.structure_analyzer.analyze()
+            logger.info(f"Structure analysis complete for {source_file}")
+            
+            # Apply TOC Seeding via heading_path enrichment
+            # Logic: TOC Path is the master context. 
+            # To avoid noise and excessive length, we cap the hierarchy:
+            # - If TOC is at Section level (e.g. 3.2), we stop there for standard chunks.
+            # - We strictly filter out sidebars and known noise from the parser's path.
+            for seg in flat_segments:
+                page = seg.get('page', 1)
+                gold_path = self.structure_analyzer.get_heading_path(page)
+                if gold_path:
+                    current_path = seg.get('heading_path', '')
+                    
+                    # 1. Clean current_path using aggressive logic
+                    gold_parts = [p.strip() for p in gold_path.split(' > ')]
+                    curr_parts = [p.strip() for p in current_path.split(' > ')]
+                    
+                    noise_pats = [
+                        r'E-INVESTMENTS', r'EXERCISES', r'Concept Check', r'CONCEPT', 
+                        r'Source:', r'Summary', r'Key Terms', r'\d+[\s\d]+LWI'
+                    ]
+                    
+                    clean_curr = []
+                    gold_norms = [re.sub(r'[^a-zA-Z0-9]', '', p.lower()) for p in gold_parts]
+                    for p in curr_parts:
+                        p_norm = re.sub(r'[^a-zA-Z0-9]', '', p.lower())
+                        # Filter noise
+                        if any(re.search(pat, p, re.IGNORECASE) for pat in noise_pats):
+                            continue
+                        # Filter redundancy with gold path
+                        if p_norm in gold_norms or len(p_norm) < 3:
+                            continue
+                        clean_curr.append(p)
+
+                    # 2. Decision Logic for Length
+                    if len(gold_parts) >= 3:
+                        # We are already at Section level (Part > Chap > Sect)
+                        # Only append ONE local heading if it exists and looks structural
+                        if clean_curr and seg.get('type') == 'Header':
+                            seg['heading_path'] = f"{gold_path} > {clean_curr[-1]}"
+                        else:
+                            seg['heading_path'] = gold_path
+                    else:
+                        # Shallow TOC, can afford 1-2 local headings
+                        local_tail = " > ".join(clean_curr[-1:]) if clean_curr else ""
+                        seg['heading_path'] = f"{gold_path} > {local_tail}" if local_tail else gold_path
+                    
+                    # Update context text
+                    seg['full_context_text'] = f"[Path: {seg['heading_path']}] {seg.get('text', '')}"
+            
+            front_range = self.structure["sections"]["front_matter"]
+            back_range = self.structure["sections"]["back_matter"]
+            if self.structure["sections"]["glossary"]:
+                glossary_pages = set(range(self.structure["sections"]["glossary"][0], self.structure["sections"]["glossary"][1] + 1))
+            
+            logger.info(f"Structure: Applied TOC seeding to {len(flat_segments)} segments.")
+        else:
+            self.structure = None
         
         # 5. Build Block Catalog (Reference Detection)
         block_catalog = self.reference_detector.build_block_catalog(flat_segments)
         self.chunk_factory.set_block_catalog(block_catalog)
         
+        # 5.5 Initialize LogicBook (Markdown Structure)
+        logic_book = None
+        markdown_text = data.get('full_markdown', '')
+        if markdown_text:
+            logic_book = LogicBook(markdown_text)
+        
         # 6. Process Segments into Chunks
-        chunks = self._process_segments(flat_segments, toc_pages=toc_pages, exclude_pages=glossary_pages)
+        chunks = self._process_segments(
+            flat_segments, 
+            toc_pages=set(), # Handled by gold_path now
+            exclude_pages=glossary_pages,
+            logic_book=logic_book
+        )
         
         # 7. Process Glossary (Specialized Path)
         if glossary_pages:
@@ -118,7 +186,11 @@ class LogicSegmenter:
         enriched_chunks = KGLinker.link(chunks)
         
         # 9. Book Metadata (Strict API)
-        book_metadata = self.metadata_manager.extract_strict(flat_segments)
+        try:
+            book_metadata = self.metadata_manager.extract_strict(flat_segments)
+        except Exception as e:
+            logger.warning(f"MetadataManager: Strict extraction failed ({e}). Using falling back toDocling metadata.")
+            book_metadata = {}
 
         # 10. Generate Stats & Output
         processing_stats = MetricsCollector.calculate(enriched_chunks)
@@ -142,7 +214,8 @@ class LogicSegmenter:
                 "context_overlap", "imperative_detection", "theorem_tagging", 
                 "length_control", "reading_order_correction", "heading_reconstruction",
                 "backfill_correction", "cross_page_continuation", "furniture_detection",
-                "dehyphenation", "reference_detection", "kg_edges", "strict_toc_seeding"
+                "dehyphenation", "reference_detection", "kg_edges", 
+                "strict_toc_seeding", "structure_analysis_v2", "heuristic_sectioning"
             ],
             "processing_stats": processing_stats
         })
@@ -159,12 +232,14 @@ class LogicSegmenter:
 
 
 
-    def _process_segments(self, segments: List[Dict], toc_pages: set = None, exclude_pages: set = None) -> List[EnrichedChunk]:
+    def _process_segments(self, segments: List[Dict], toc_pages: set = None, 
+                          exclude_pages: set = None, logic_book: LogicBook = None) -> List[EnrichedChunk]:
         """
         Core processing logic:
         1. Handle cross-page continuations with evidence tracking
         2. Group related segments (lists, procedures)
         3. Create enriched chunks with continuation metadata and evidence
+        4. (NEW) Use logic_book for Markdown-verified hierarchy
         """
         chunks = []
         buffer = []
@@ -188,6 +263,23 @@ class LogicSegmenter:
             continuation_evidence = seg.get('continuation_evidence', {})
             seg_col = seg.get('column_index', -1)
             
+            # 0.5 LogicBook Alignment: Primary Structural Authority
+            logic_path = None
+            if logic_book:
+                # NEW: Clean Parser noise (institutional info, printing artifacts)
+                if logic_book.is_noise(seg_text) and seg_type == 'Header':
+                    logger.debug(f"LogicBook: Demoting noise header '{seg_text[:30]}' to Paragraph")
+                    seg_type = 'Paragraph'
+                    seg['type'] = 'Paragraph'
+
+                logic_path = logic_book.get_path(seg_text)
+                if logic_path:
+                    # Upgrade to Header if LogicBook confirms it's a heading
+                    # Use authoritative path, but don't lose the TOC depth if we already have it
+                    if not heading_path or len(logic_path) > len(heading_path):
+                        heading_path = logic_path
+                        seg['heading_path'] = logic_path
+
             # TOC Special Handling
             if seg.get('page', 0) in toc_pages:
                 # If matching TOC line pattern (chapter/section ... page)
@@ -612,7 +704,41 @@ class LogicSegmenter:
             chunk.merge_evidence = self._compile_merge_evidence(merge_evidences)
             chunks.append(chunk)
         
+        # Apply Structure-based Tagging (Zone & Type overrides)
+        for chunk in chunks:
+            self._tag_chunk_by_structure(chunk)
+            
         return chunks
+
+    def _tag_chunk_by_structure(self, chunk: EnrichedChunk):
+        """Overrides chunk_type and doc_zone based on PDF structure maps."""
+        if not self.structure:
+            return
+            
+        page = chunk.page_range[0]
+        boundaries = self.structure["sections"]
+        
+        # 1. Zone Classification
+        if page <= boundaries["front_matter"][1]:
+            chunk.doc_zone = "front"
+            # User request: front matter chunks get special type
+            if chunk.chunk_type not in ["header"]:
+                chunk.chunk_type = "front_matter"
+        elif page >= boundaries["back_matter"][0]:
+            chunk.doc_zone = "back"
+            # Glossary check
+            is_glossary = False
+            if boundaries.get("glossary"):
+                if boundaries["glossary"][0] <= page <= boundaries["glossary"][1]:
+                    is_glossary = True
+            
+            if is_glossary:
+                chunk.chunk_type = "glossary"
+            else:
+                chunk.chunk_type = "back_matter"
+        else:
+            chunk.doc_zone = "body"
+
     
     def _compile_merge_evidence(self, evidences: List[Dict]) -> Dict[str, Any]:
         """
