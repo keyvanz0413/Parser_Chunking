@@ -68,6 +68,29 @@ class EnrichedChunk:
     continuation_type: str = "none"  # none, full, partial
     needs_review: bool = False
     merge_evidence: Dict[str, Any] = field(default_factory=dict)
+    # Traceability: Bounding boxes
+    bbox: List[float] = field(default_factory=list)      # Combined bbox [x1, y1, x2, y2]
+    page_bboxes: Dict[int, List[float]] = field(default_factory=dict) # Per-page bboxes
     # NEW: Reference detection
     references: List[Reference] = field(default_factory=list)
     doc_zone: str = "body"      # "front", "body", "back"
+    # NEW: Knowledge Graph Edges
+    edges: List["Edge"] = field(default_factory=list)
+
+@dataclass
+class Edge:
+    """
+    Represents a directed relationship between this chunk and another entity.
+    Used for building Knowledge Graphs (KG) for RAG.
+    """
+    target_id: str      # ID of the target chunk or entity
+    edge_type: str      # Enum from EdgeType
+    metadata: Dict[str, Any] = field(default_factory=dict) # e.g., {'confidence': 0.9}
+
+class EdgeType:
+    """Standardized edge types for RAG KGs."""
+    PART_OF = "part_of"       # Hierarchical: Section -> Chapter
+    NEXT = "next"             # Sequential: Para 1 -> Para 2
+    REFERENCES = "references" # Explicit: "See Figure 1" -> Figure 1
+    DEFINES = "defines"       # Semantic: "ROI is..." -> "ROI" (Concept)
+    CONTAINS = "contains"     # Inverse of PART_OF

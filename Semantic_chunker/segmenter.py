@@ -6,7 +6,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .config import ChunkingConfig
-from .schema import EnrichedChunk
+from .schema import EnrichedChunk, SentenceRole, Reference, Edge, EdgeType
 from .detectors.tags import TagDetector
 from .detectors.continuation import ContinuationDetector
 from .detectors.references import ReferenceDetector
@@ -14,27 +14,20 @@ from .analyzers.pos_analyzer import POSAnalyzer
 from .analyzers.reading_order import ReadingOrderCorrector
 from .analyzers.gatekeeper import ContentGatekeeper
 from .utils.caption_bonding import CaptionBondingHelper
+from .utils.caption_bonding import CaptionBondingHelper
 from .utils.dehyphenation import DehyphenationHelper
+from .utils.metadata_manager import MetadataManager
+from .toc_parser import TOCParser
+from .special_blocks import GlossaryDetector
+from .analyzers.kg_linker import KGLinker
+from .analyzers.chunk_factory import ChunkFactory
+from .utils.metrics import MetricsCollector
 
 logger = logging.getLogger(__name__)
 
 class LogicSegmenter:
     """
     Main segmenter that processes flat_segments from parser_docling.py.
-    
-    Pipeline (Three-Phase Architecture):
-    1. Load segments from JSON
-    2. Apply Three-Phase Correction Pipeline:
-       - Phase 1: Column-based reading order correction
-       - Phase 2: Heading stack reconstruction
-       - Phase 3: Same-page backfilling for L1 headers
-    3. Annotate segments with continuation markers
-    4. Group segments by logical rules (lists, procedures, cross-page)
-    5. Analyze with POS tagging (enhanced with imperative detection)
-    6. Apply context overlap for RAG continuity
-    7. Enrich with tags (20+ including Theorem/Lemma/Proof)
-    8. Apply length constraints (min/max word counts)
-    9. Output standardized chunks with continuation metadata
     """
     
     def __init__(self, use_pos: bool = True, config: ChunkingConfig = None):
@@ -44,22 +37,21 @@ class LogicSegmenter:
         self.continuation_detector = ContinuationDetector(self.config)
         self.reading_order_corrector = ReadingOrderCorrector(self.config)
         self.reference_detector = ReferenceDetector(self.config)
-        self.caption_bonding_helper = CaptionBondingHelper(self.config)  # Caption bonding
-        self.chunk_counter = 0
-        self.previous_chunk_text = ""  # For overlap
-        self.block_catalog = None  # Will be populated during processing
-        self.structural_heading_path = ""  # Track structural headers separately from block captions
+        self.caption_bonding_helper = CaptionBondingHelper(self.config)
+        self.toc_parser = TOCParser()
+        self.glossary_detector = GlossaryDetector()
+        self.metadata_manager = MetadataManager()
+        
+        # New decoupled factory
+        self.chunk_factory = ChunkFactory(
+            self.config, self.tag_detector, self.pos_analyzer, self.reference_detector
+        )
+        
+        self.structural_heading_path = ""
     
     def process_file(self, input_json_path: str, output_path: Optional[str] = None) -> Dict[str, Any]:
         """
         Process a parser_docling.py output file.
-        
-        Args:
-            input_json_path: Path to the JSON from parser_docling
-            output_path: Optional path to save enriched output
-            
-        Returns:
-            Dictionary with enriched chunks and statistics
         """
         logger.info(f"Processing: {input_json_path}")
         
@@ -71,18 +63,28 @@ class LogicSegmenter:
         
         logger.info(f"Loaded {len(flat_segments)} segments")
         
-        # Pre-execution Gating: Detect Main Body start/end
+        # 1. Detect TOC Pages
+        toc_pages = self.toc_parser.detect_pages(flat_segments)
+        
+        # 2. Parse TOC Structure (Strict Seeding)
+        toc_entries = self.toc_parser.parse(flat_segments, toc_pages)
+        if toc_entries:
+            flat_segments = self.toc_parser.apply_skeleton(flat_segments, toc_entries)
+
+        # 3. Detect Glossary Pages (NEW)
+        glossary_pages = self.glossary_detector.detect_glossary_pages(flat_segments)
+        if glossary_pages:
+            logger.info(f"Detected Glossary on pages: {sorted(list(glossary_pages))}")
+
+        # 4. Content Gating
         gating_info = None
         if self.config.ENABLE_CONTENT_GATING:
-            # We need toc_pages for better gating, detect them first
-            toc_pages = self._detect_toc_pages(flat_segments)
             gatekeeper = ContentGatekeeper(self.config)
             gating_info = gatekeeper.analyze(flat_segments, detected_toc_pages=toc_pages)
             if gating_info.get('start_id'):
                 logger.info("Main Body Gating: Active for this document")
 
-        # Apply Three-Phase Correction Pipeline
-        # This must run BEFORE continuation detection to ensure correct reading order
+        # 4. Reading Order Correction
         if (self.config.ENABLE_READING_ORDER_CORRECTION or 
             self.config.ENABLE_HEADING_RECONSTRUCTION or 
             self.config.ENABLE_BACKFILL_CORRECTION):
@@ -91,101 +93,73 @@ class LogicSegmenter:
         else:
             corrector_stats = {}
         
-        # Optional: Strip Front Matter segments completely if configured
-        if self.config.ENABLE_CONTENT_GATING and self.config.STRIP_FRONT_MATTER:
-            original_len = len(flat_segments)
-            flat_segments = [s for s in flat_segments if s.get('doc_zone') != 'front']
-            logger.info(f"Gating: Stripped {original_len - len(flat_segments)} front-matter segments")
+        # 5. Build Block Catalog (Reference Detection)
+        block_catalog = self.reference_detector.build_block_catalog(flat_segments)
+        self.chunk_factory.set_block_catalog(block_catalog)
         
-        # Annotate segments with continuation markers
-        if self.config.ENABLE_CONTINUATION_DETECTION:
-            flat_segments = self.continuation_detector.annotate_segments(flat_segments)
-            continuation_count = sum(1 for s in flat_segments if s.get('is_continuation') != 'none')
-            logger.info(f"Detected {continuation_count} cross-page continuations")
+        # 6. Process Segments into Chunks
+        chunks = self._process_segments(flat_segments, toc_pages=toc_pages, exclude_pages=glossary_pages)
         
-        # Detect TOC pages
-        toc_pages = self._detect_toc_pages(flat_segments)
-        if toc_pages:
-            logger.info(f"Detected TOC on pages: {sorted(list(toc_pages))}")
+        # 7. Process Glossary (Specialized Path)
+        if glossary_pages:
+            glossary_items = self.glossary_detector.parse(flat_segments, glossary_pages)
+            for item in glossary_items:
+                chunk = self.chunk_factory.create_chunk(
+                    [item], # Glossary uses artificial segments or just items
+                    "Glossary", 
+                    chunk_type="definition"
+                )
+                chunks.append(chunk)
         
-        # Build block catalog for reference detection
-        self.block_catalog = self.reference_detector.build_block_catalog(flat_segments)
-        logger.info(f"Built block catalog: {len(self.block_catalog['by_segment_id'])} blocks, "
-                   f"{len(self.block_catalog['by_caption'])} with captions")
-        
-        # Process segments into chunks
-        chunks = self._process_segments(flat_segments, toc_pages=toc_pages)
-        
-        # Post-process: merge short chunks and apply overlap
+        # 7. Post-process (Merge, Overlap)
         chunks = self._post_process_chunks(chunks)
         
-        # Build feature list
-        features = ["context_overlap", "imperative_detection", "theorem_tagging", "length_control"]
-        if self.config.ENABLE_READING_ORDER_CORRECTION:
-            features.append("reading_order_correction")
-        if self.config.ENABLE_HEADING_RECONSTRUCTION:
-            features.append("heading_reconstruction")
-        if self.config.ENABLE_BACKFILL_CORRECTION:
-            features.append("backfill_correction")
-        if self.config.ENABLE_CONTINUATION_DETECTION:
-            features.append("cross_page_continuation")
-        if self.config.ENABLE_FURNITURE_DETECTION:
-            features.append("furniture_detection")
-        if self.config.ENABLE_DEHYPHENATION:
-            features.append("dehyphenation")
-        features.append("reference_detection")  # NEW
+        # 8. Enrich & Link (KG Edges)
+        enriched_chunks = KGLinker.link(chunks)
         
-        # Calculate stats and include corrector stats
-        processing_stats = self._calculate_stats(chunks)
+        # 9. Book Metadata (Strict API)
+        book_metadata = self.metadata_manager.extract_strict(flat_segments)
+
+        # 10. Generate Stats & Output
+        processing_stats = MetricsCollector.calculate(enriched_chunks)
         if corrector_stats:
             processing_stats['reading_order_correction'] = corrector_stats
+            
+        # Flatten and merge metadata
+        # We merge book_metadata fields into the top-level metadata
+        # Existing metadata from parser_docling (like source_file) is preserved
+        final_metadata = {**metadata}
+        for k, v in book_metadata.items():
+            if v and (not final_metadata.get(k) or final_metadata.get(k) == ""):
+                final_metadata[k] = v
         
+        # Add processing-specific fields
+        final_metadata.update({
+            "total_chunks": len(enriched_chunks),
+            "total_segments": len(flat_segments),
+            "processing_version": "production",
+            "features": [
+                "context_overlap", "imperative_detection", "theorem_tagging", 
+                "length_control", "reading_order_correction", "heading_reconstruction",
+                "backfill_correction", "cross_page_continuation", "furniture_detection",
+                "dehyphenation", "reference_detection", "kg_edges", "strict_toc_seeding"
+            ],
+            "processing_stats": processing_stats
+        })
+
         result = {
-            "metadata": {
-                **metadata,
-                "total_chunks": len(chunks),
-                "total_segments": len(flat_segments),
-                "processing_version": "production",
-                "features": features,
-                "processing_stats": processing_stats
-            },
-            "chunks": [asdict(c) for c in chunks]
+            "metadata": final_metadata,
+            "chunks": [asdict(c) for c in enriched_chunks]
         }
         
         if output_path:
             self._save_json(result, output_path)
         
         return result
-    
-    def _detect_toc_pages(self, segments: List[Dict]) -> set:
-        """Detect pages that are likely Table of Contents."""
-        from collections import defaultdict
-        toc_pages = set()
-        page_texts = defaultdict(list)
-        for seg in segments:
-            p = seg.get('page', 0)
-            page_texts[p].append(seg.get('text', '').lower())
-        
-        toc_keywords = {
-            'contents', 'table of contents', 'index', '目录', 
-            'brief contents', 'detailed contents', 'summary table of contents'
-        }
-        for p, texts in page_texts.items():
-            full_text = " ".join(texts)
-            # 1. Keyword check (prioritize early pages)
-            if any(kw in full_text for kw in toc_keywords) and p < 60:
-                toc_pages.add(p)
-                continue
-            # 2. Structure check: dotted leaders + numbers at end of lines
-            # Restricted to very early document to avoid misdetecting List of Tables/Figures
-            if p < 45: 
-                # Require more dots (5) and ensure it looks like a TOC line
-                dotted_lines = sum(1 for t in texts if re.search(r'[\.·-]{5,}\s*\d+$', t))
-                if dotted_lines >= 3:
-                    toc_pages.add(p)
-        return toc_pages
 
-    def _process_segments(self, segments: List[Dict], toc_pages: set = None) -> List[EnrichedChunk]:
+
+
+    def _process_segments(self, segments: List[Dict], toc_pages: set = None, exclude_pages: set = None) -> List[EnrichedChunk]:
         """
         Core processing logic:
         1. Handle cross-page continuations with evidence tracking
@@ -200,8 +174,13 @@ class LogicSegmenter:
         merge_evidences = []  # Collect all evidence for this buffer
         
         toc_pages = toc_pages or set()
+        exclude_pages = exclude_pages or set()
         
         for i, seg in enumerate(segments):
+            # Skip excluded pages (e.g. Glossary)
+            if seg.get('page', 0) in exclude_pages:
+                continue
+                
             seg_text = seg.get('text', '')
             seg_type = seg.get('type', 'Paragraph')
             heading_path = seg.get('heading_path', '')
@@ -246,7 +225,7 @@ class LogicSegmenter:
                     pass
 
             if should_flush_by_guard and buffer:
-                chunk = self._create_chunk(buffer, current_heading_path)
+                chunk = self.chunk_factory.create_chunk(buffer, current_heading_path)
                 chunk.is_cross_page = has_cross_page
                 chunk.continuation_type = continuation_type
                 chunk.needs_review = (continuation_type == 'partial')
@@ -299,7 +278,7 @@ class LogicSegmenter:
                 
                 # Still check buffer size limit
                 if len(buffer) >= self.config.MAX_BUFFER_SEGMENTS * 2:  # Allow 2x for continuations
-                    chunk = self._create_chunk(buffer, current_heading_path)
+                    chunk = self.chunk_factory.create_chunk(buffer, current_heading_path)
                     chunk.is_cross_page = has_cross_page
                     chunk.continuation_type = continuation_type
                     chunk.needs_review = (continuation_type == 'partial')
@@ -341,7 +320,7 @@ class LogicSegmenter:
                 
                 # Structural header: flush buffer and update global heading path
                 if buffer:
-                    chunk = self._create_chunk(buffer, current_heading_path)
+                    chunk = self.chunk_factory.create_chunk(buffer, current_heading_path)
                     chunk.is_cross_page = has_cross_page
                     chunk.continuation_type = continuation_type
                     chunk.needs_review = (continuation_type == 'partial')
@@ -357,7 +336,7 @@ class LogicSegmenter:
                 self.structural_heading_path = heading_path
                 
                 # Headers themselves become chunks
-                chunks.append(self._create_chunk([seg], heading_path, chunk_type="header"))
+                chunks.append(self.chunk_factory.create_chunk([seg], heading_path, chunk_type="header"))
                 continue
             
             # =================================================================
@@ -373,7 +352,7 @@ class LogicSegmenter:
                 # Rule 2b: Standard List Item grouping
                 # If buffer has non-list items, flush first
                 if buffer and buffer[-1].get('type') != 'ListItem':
-                    chunk = self._create_chunk(buffer, current_heading_path)
+                    chunk = self.chunk_factory.create_chunk(buffer, current_heading_path)
                     chunk.is_cross_page = has_cross_page
                     chunk.continuation_type = continuation_type
                     chunk.needs_review = (continuation_type == 'partial')
@@ -390,7 +369,7 @@ class LogicSegmenter:
             # Rule 3: If we have ListItems in buffer and current is not ListItem, flush
             # =================================================================
             if buffer and buffer[-1].get('type') == 'ListItem' and seg_type != 'ListItem':
-                chunk = self._create_chunk(buffer, current_heading_path, chunk_type="list")
+                chunk = self.chunk_factory.create_chunk(buffer, current_heading_path, chunk_type="list")
                 chunk.is_cross_page = has_cross_page
                 chunk.continuation_type = continuation_type
                 chunk.needs_review = (continuation_type == 'partial')
@@ -422,7 +401,7 @@ class LogicSegmenter:
                 
                 # First, flush any non-caption content separately
                 if other_segs:
-                    chunk = self._create_chunk(other_segs, current_heading_path)
+                    chunk = self.chunk_factory.create_chunk(other_segs, current_heading_path)
                     chunk.is_cross_page = has_cross_page
                     chunk.continuation_type = continuation_type
                     chunk.needs_review = (continuation_type == 'partial')
@@ -460,17 +439,17 @@ class LogicSegmenter:
                              # Flush caption + notes
                              all_caption_content = [caption_seg] + notes_segs
                              if all_caption_content:
-                                 chunk = self._create_chunk(all_caption_content, current_heading_path)
+                                 chunk = self.chunk_factory.create_chunk(all_caption_content, current_heading_path)
                                  chunks.append(chunk)
                              # Create standalone block
-                             chunks.append(self._create_chunk([seg], heading_path, chunk_type=seg_type.lower()))
+                             chunks.append(self.chunk_factory.create_chunk([seg], heading_path, chunk_type=seg_type.lower()))
                         else:
                             # SUCCESS: Bond caption + notes + block into single atomic unit
                             bonded_segments = [caption_seg] + notes_segs + [seg]
                             caption_text = caption_seg.get('text', '').strip()
                             effective_heading_path = self.structural_heading_path or current_heading_path
                             
-                            chunk = self._create_chunk(
+                            chunk = self.chunk_factory.create_chunk(
                                 bonded_segments, 
                                 effective_heading_path, 
                                 chunk_type=seg_type.lower()
@@ -489,18 +468,18 @@ class LogicSegmenter:
                         # Flush caption + notes
                         all_caption_content = [caption_seg] + notes_segs
                         if all_caption_content:
-                            chunk = self._create_chunk(all_caption_content, current_heading_path)
+                            chunk = self.chunk_factory.create_chunk(all_caption_content, current_heading_path)
                             chunks.append(chunk)
                         # Create standalone block
-                        chunks.append(self._create_chunk([seg], heading_path, chunk_type=seg_type.lower()))
+                        chunks.append(self.chunk_factory.create_chunk([seg], heading_path, chunk_type=seg_type.lower()))
                 else:
                     # No caption in buffer, just create standalone chunk
                     if notes_segs:
                         # Flush notes first
-                        chunk = self._create_chunk(notes_segs, current_heading_path)
+                        chunk = self.chunk_factory.create_chunk(notes_segs, current_heading_path)
                         chunks.append(chunk)
                     
-                    chunks.append(self._create_chunk([seg], heading_path, chunk_type=seg_type.lower()))
+                    chunks.append(self.chunk_factory.create_chunk([seg], heading_path, chunk_type=seg_type.lower()))
                 
                 # Clear buffer
                 buffer = []
@@ -515,7 +494,7 @@ class LogicSegmenter:
             if seg_type == 'LearningObjective':
                 # If buffer has non-LO content OR heading changed, flush first
                 if buffer and (buffer[-1].get('type') != 'LearningObjective' or buffer[-1].get('heading_path', '') != heading_path):
-                    chunk = self._create_chunk(buffer, current_heading_path)
+                    chunk = self.chunk_factory.create_chunk(buffer, current_heading_path)
                     chunk.is_cross_page = has_cross_page
                     chunk.continuation_type = continuation_type
                     chunk.needs_review = (continuation_type == 'partial')
@@ -544,7 +523,7 @@ class LogicSegmenter:
                      logger.debug(f"Soft Adsorption: Small paragraph {seg.get('segment_id')} added to LO chunk")
                      continue
 
-                chunk = self._create_chunk(buffer, current_heading_path, chunk_type="learning_objective")
+                chunk = self.chunk_factory.create_chunk(buffer, current_heading_path, chunk_type="learning_objective")
                 chunk.is_cross_page = has_cross_page
                 chunk.continuation_type = continuation_type
                 chunk.needs_review = (continuation_type == 'partial')
@@ -561,7 +540,7 @@ class LogicSegmenter:
             text = seg.get('text', '')
             if re.match(r'^(?:Theorem|Lemma|Proposition|Corollary|Proof)\s*\d*', text, re.IGNORECASE):
                 if buffer:
-                    chunk = self._create_chunk(buffer, current_heading_path)
+                    chunk = self.chunk_factory.create_chunk(buffer, current_heading_path)
                     chunk.is_cross_page = has_cross_page
                     chunk.continuation_type = continuation_type
                     chunk.needs_review = (continuation_type == 'partial')
@@ -613,7 +592,7 @@ class LogicSegmenter:
                     break  # Only check the first non-noise segment
                 
                 if not should_delay_flush:
-                    chunk = self._create_chunk(buffer, current_heading_path)
+                    chunk = self.chunk_factory.create_chunk(buffer, current_heading_path)
                     chunk.is_cross_page = has_cross_page
                     chunk.continuation_type = continuation_type
                     chunk.needs_review = (continuation_type == 'partial')
@@ -626,7 +605,7 @@ class LogicSegmenter:
         
         # Flush remaining buffer
         if buffer:
-            chunk = self._create_chunk(buffer, current_heading_path)
+            chunk = self.chunk_factory.create_chunk(buffer, current_heading_path)
             chunk.is_cross_page = has_cross_page
             chunk.continuation_type = continuation_type
             chunk.needs_review = (continuation_type == 'partial')
@@ -738,6 +717,21 @@ class LogicSegmenter:
                             # Bond: prepend caption to table content
                             prev_chunk.content = chunk.content + "\n" + prev_chunk.content if prev_chunk.content else chunk.content
                             prev_chunk.source_segments.extend(chunk.source_segments)
+                            
+                            # Update bboxes
+                            prev_chunk.bbox = [
+                                min(prev_chunk.bbox[0], chunk.bbox[0]) if prev_chunk.bbox and chunk.bbox else (prev_chunk.bbox[0] if prev_chunk.bbox else (chunk.bbox[0] if chunk.bbox else 0)),
+                                min(prev_chunk.bbox[1], chunk.bbox[1]) if prev_chunk.bbox and chunk.bbox else (prev_chunk.bbox[1] if prev_chunk.bbox else (chunk.bbox[1] if chunk.bbox else 0)),
+                                max(prev_chunk.bbox[2], chunk.bbox[2]) if prev_chunk.bbox and chunk.bbox else (prev_chunk.bbox[2] if prev_chunk.bbox else (chunk.bbox[2] if chunk.bbox else 0)),
+                                max(prev_chunk.bbox[3], chunk.bbox[3]) if prev_chunk.bbox and chunk.bbox else (prev_chunk.bbox[3] if prev_chunk.bbox else (chunk.bbox[3] if chunk.bbox else 0)),
+                            ]
+                            for p, b in chunk.page_bboxes.items():
+                                if p not in prev_chunk.page_bboxes:
+                                    prev_chunk.page_bboxes[p] = b
+                                else:
+                                    pb = prev_chunk.page_bboxes[p]
+                                    prev_chunk.page_bboxes[p] = [min(pb[0], b[0]), min(pb[1], b[1]), max(pb[2], b[2]), max(pb[3], b[3])]
+
                             prev_chunk.merge_evidence = {
                                 "bonded": True,
                                 "caption_text": content.split('\n')[0][:50],
@@ -761,6 +755,21 @@ class LogicSegmenter:
                                     # Bond: prepend caption to next chunk
                                     next_chunk.content = chunk.content + "\n" + next_chunk.content if next_chunk.content else chunk.content
                                     next_chunk.source_segments = chunk.source_segments + next_chunk.source_segments
+                                    
+                                    # Update bboxes
+                                    next_chunk.bbox = [
+                                        min(next_chunk.bbox[0], chunk.bbox[0]) if next_chunk.bbox and chunk.bbox else (next_chunk.bbox[0] if next_chunk.bbox else (chunk.bbox[0] if chunk.bbox else 0)),
+                                        min(next_chunk.bbox[1], chunk.bbox[1]) if next_chunk.bbox and chunk.bbox else (next_chunk.bbox[1] if next_chunk.bbox else (chunk.bbox[1] if chunk.bbox else 0)),
+                                        max(next_chunk.bbox[2], chunk.bbox[2]) if next_chunk.bbox and chunk.bbox else (next_chunk.bbox[2] if next_chunk.bbox else (chunk.bbox[2] if chunk.bbox else 0)),
+                                        max(next_chunk.bbox[3], chunk.bbox[3]) if next_chunk.bbox and chunk.bbox else (next_chunk.bbox[3] if next_chunk.bbox else (chunk.bbox[3] if chunk.bbox else 0)),
+                                    ]
+                                    for p, b in chunk.page_bboxes.items():
+                                        if p not in next_chunk.page_bboxes:
+                                            next_chunk.page_bboxes[p] = b
+                                        else:
+                                            pb = next_chunk.page_bboxes[p]
+                                            next_chunk.page_bboxes[p] = [min(pb[0], b[0]), min(pb[1], b[1]), max(pb[2], b[2]), max(pb[3], b[3])]
+
                                     next_chunk.merge_evidence = {
                                         "bonded": True,
                                         "caption_text": content.split('\n')[0][:50],
@@ -812,6 +821,21 @@ class LogicSegmenter:
                         chunk.tags = list(set(chunk.tags + next_chunk.tags))
                         chunk.chunk_type = 'learning_objective' 
                         chunk.word_count = len(chunk.content.split())
+                        
+                        # Update bboxes
+                        chunk.bbox = [
+                            min(chunk.bbox[0], next_chunk.bbox[0]) if chunk.bbox and next_chunk.bbox else (chunk.bbox[0] if chunk.bbox else (next_chunk.bbox[0] if next_chunk.bbox else 0)),
+                            min(chunk.bbox[1], next_chunk.bbox[1]) if chunk.bbox and next_chunk.bbox else (chunk.bbox[1] if chunk.bbox else (next_chunk.bbox[1] if next_chunk.bbox else 0)),
+                            max(chunk.bbox[2], next_chunk.bbox[2]) if chunk.bbox and next_chunk.bbox else (chunk.bbox[2] if chunk.bbox else (next_chunk.bbox[2] if next_chunk.bbox else 0)),
+                            max(chunk.bbox[3], next_chunk.bbox[3]) if chunk.bbox and next_chunk.bbox else (chunk.bbox[3] if chunk.bbox else (next_chunk.bbox[3] if next_chunk.bbox else 0)),
+                        ]
+                        for p, b in next_chunk.page_bboxes.items():
+                            if p not in chunk.page_bboxes:
+                                chunk.page_bboxes[p] = b
+                            else:
+                                pb = chunk.page_bboxes[p]
+                                chunk.page_bboxes[p] = [min(pb[0], b[0]), min(pb[1], b[1]), max(pb[2], b[2]), max(pb[3], b[3])]
+
                         skip_indices.add(j)
                         logger.info(f"Hard Regrouping: LO Header merged with {next_chunk.chunk_type} (chunk_{j})")
                         # Keep looking if there's more to adsorb
@@ -835,6 +859,21 @@ class LogicSegmenter:
                             # Bond: prepend caption to table
                             chunk.content = next_chunk.content + "\n" + chunk.content if chunk.content else next_chunk.content
                             chunk.source_segments = next_chunk.source_segments + chunk.source_segments
+                            
+                            # Update bboxes
+                            chunk.bbox = [
+                                min(chunk.bbox[0], next_chunk.bbox[0]) if chunk.bbox and next_chunk.bbox else (chunk.bbox[0] if chunk.bbox else (next_chunk.bbox[0] if next_chunk.bbox else 0)),
+                                min(chunk.bbox[1], next_chunk.bbox[1]) if chunk.bbox and next_chunk.bbox else (chunk.bbox[1] if chunk.bbox else (next_chunk.bbox[1] if next_chunk.bbox else 0)),
+                                max(chunk.bbox[2], next_chunk.bbox[2]) if chunk.bbox and next_chunk.bbox else (chunk.bbox[2] if chunk.bbox else (next_chunk.bbox[2] if next_chunk.bbox else 0)),
+                                max(chunk.bbox[3], next_chunk.bbox[3]) if chunk.bbox and next_chunk.bbox else (chunk.bbox[3] if chunk.bbox else (next_chunk.bbox[3] if next_chunk.bbox else 0)),
+                            ]
+                            for p, b in next_chunk.page_bboxes.items():
+                                if p not in chunk.page_bboxes:
+                                    chunk.page_bboxes[p] = b
+                                else:
+                                    pb = chunk.page_bboxes[p]
+                                    chunk.page_bboxes[p] = [min(pb[0], b[0]), min(pb[1], b[1]), max(pb[2], b[2]), max(pb[3], b[3])]
+
                             chunk.merge_evidence = {
                                 "bonded": True,
                                 "caption_text": next_chunk.content.split('\n')[0][:50],
@@ -912,10 +951,25 @@ class LogicSegmenter:
                     merged_tags = list(set(current.tags + next_chunk.tags))
                     merged_sources = current.source_segments + next_chunk.source_segments
                     
+                    # Merge bboxes
+                    merged_bbox = [
+                        min(current.bbox[0], next_chunk.bbox[0]) if current.bbox and next_chunk.bbox else (current.bbox[0] if current.bbox else (next_chunk.bbox[0] if next_chunk.bbox else 0)),
+                        min(current.bbox[1], next_chunk.bbox[1]) if current.bbox and next_chunk.bbox else (current.bbox[1] if current.bbox else (next_chunk.bbox[1] if next_chunk.bbox else 0)),
+                        max(current.bbox[2], next_chunk.bbox[2]) if current.bbox and next_chunk.bbox else (current.bbox[2] if current.bbox else (next_chunk.bbox[2] if next_chunk.bbox else 0)),
+                        max(current.bbox[3], next_chunk.bbox[3]) if current.bbox and next_chunk.bbox else (current.bbox[3] if current.bbox else (next_chunk.bbox[3] if next_chunk.bbox else 0)),
+                    ]
+                    merged_page_bboxes = dict(current.page_bboxes)
+                    for p, b in next_chunk.page_bboxes.items():
+                        if p not in merged_page_bboxes:
+                            merged_page_bboxes[p] = b
+                        else:
+                            pb = merged_page_bboxes[p]
+                            merged_page_bboxes[p] = [min(pb[0], b[0]), min(pb[1], b[1]), max(pb[2], b[2]), max(pb[3], b[3])]
+
                     merged_chunk = EnrichedChunk(
                         chunk_id=current.chunk_id,
                         heading_path=current.heading_path,
-                        chunk_type=self._infer_chunk_type_from_tags(merged_tags),
+                        chunk_type=self.chunk_factory.infer_from_tags(merged_tags),
                         content=merged_content,
                         context_prefix=current.context_prefix,
                         sentences=current.sentences + next_chunk.sentences,
@@ -928,7 +982,9 @@ class LogicSegmenter:
                                 next_chunk.page_range[1] if len(next_chunk.page_range) > 1 else 0)
                         ],
                         depth=current.depth,
-                        word_count=len(merged_content.split())
+                        word_count=len(merged_content.split()),
+                        bbox=merged_bbox,
+                        page_bboxes=merged_page_bboxes
                     )
                     merged.append(merged_chunk)
                     i += 2  # Skip both chunks
@@ -939,229 +995,6 @@ class LogicSegmenter:
         
         return merged
     
-    def _create_chunk(self, segments: List[Dict], heading_path: str, 
-                      chunk_type: Optional[str] = None) -> EnrichedChunk:
-        """Create an enriched chunk from a list of segments."""
-        self.chunk_counter += 1
-        chunk_id = f"chunk_{self.chunk_counter:04d}"
-        
-        # Combine text - exclude furniture/noise from content
-        # Apply dehyphenation to repair word breaks across segments
-        text_parts = []
-        for s in segments:
-            # Skip furniture elements (their text shouldn't appear in content)
-            if s.get('is_furniture', False) or s.get('is_noise_header', False):
-                continue
-            text = s.get('text', '').strip()
-            if text:
-                text_parts.append(text)
-        
-        # Apply dehyphenation if enabled
-        if self.config.ENABLE_DEHYPHENATION and len(text_parts) > 1:
-            repaired_parts = []
-            dehyph = DehyphenationHelper(self.config)
-            
-            for i, part in enumerate(text_parts):
-                if i == 0:
-                    repaired_parts.append(part)
-                else:
-                    # Try to merge hyphenated word from previous part
-                    prev_part = repaired_parts[-1]
-                    new_prev, new_curr = dehyph.merge_hyphenated(prev_part, part)
-                    repaired_parts[-1] = new_prev
-                    if new_curr:  # Only add if there's remaining text
-                        repaired_parts.append(new_curr)
-                    elif not new_curr and new_prev != prev_part:
-                        # Word was fully absorbed into previous part
-                        pass
-            
-            text_parts = repaired_parts
-        
-        full_text = " ".join(text_parts).strip()
-        
-        # Word count
-        word_count = len(full_text.split())
-        
-        # Get source segment IDs (include noise headers for traceability)
-        source_ids = [s.get('segment_id', '') for s in segments if s.get('segment_id')]
-        
-        # Get page range
-        pages = [s.get('page', 0) for s in segments if s.get('page')]
-        page_range = [min(pages), max(pages)] if pages else []
-        
-        # Get depth
-        depth = segments[0].get('depth', 0) if segments else 0
-        
-        # Detect tags
-        tags = self.tag_detector.detect_tags(full_text)
-        
-        # Check for imperative start
-        if self.tag_detector.detect_imperative(full_text):
-            if "procedure" not in tags:
-                tags.append("procedure")
-        
-        # Determine chunk type early to influence sentence roles
-        if chunk_type is None:
-            chunk_type = self._infer_chunk_type(segments, tags, [])
-            
-        # Forced Role Linkage logic
-        forced_role = None
-        if chunk_type == "header":
-            forced_role = "topic"
-        elif all(s.get('is_furniture', False) or s.get('is_noise_header', False) for s in segments):
-            forced_role = "irrelevant"
-            
-        # Analyze sentences with POS
-        sentences = []
-        if self.pos_analyzer and full_text:
-            sentences = self.pos_analyzer.analyze_sentences(
-                full_text, heading_path, forced_role=forced_role, chunk_type=chunk_type
-            )
-            
-            # AGGREGATE TAGS: Ensure chunk tags include all tags found in any sentence
-            # This is crucial for 'reference' detection in complex sentences
-            sentence_tag_set = set(tags)
-            for sent in sentences:
-                if "tags" in sent:
-                    sentence_tag_set.update(sent["tags"])
-            tags = list(sentence_tag_set)
-        
-        # Determine chunk type if not provided
-        if chunk_type is None:
-            chunk_type = self._infer_chunk_type(segments, tags, sentences)
-        
-        # Detect references to Figure/Table/Equation (NEW)
-        references = []
-        if self.block_catalog and full_text:
-            chunk_page = page_range[0] if page_range else 0
-            references = self.reference_detector.detect_references(
-                full_text, chunk_page, self.block_catalog
-            )
-        
-        # Determine dominant zone for the chunk
-        zones = [s.get('doc_zone', 'body') for s in segments]
-        dominant_zone = max(set(zones), key=zones.count) if zones else "body"
-        
-        return EnrichedChunk(
-            chunk_id=chunk_id,
-            heading_path=heading_path,
-            chunk_type=chunk_type,
-            content=full_text,
-            context_prefix="",  # Will be filled in post-processing
-            sentences=sentences,
-            tags=tags,
-            source_segments=source_ids,
-            page_range=page_range,
-            depth=depth,
-            word_count=word_count,
-            references=references,
-            doc_zone=dominant_zone
-        )
-    
-    def _infer_chunk_type(self, segments: List[Dict], tags: List[str], 
-                          sentences: List[Dict]) -> str:
-        """Infer chunk type from segments, tags, and sentence analysis."""
-        seg_types = [s.get('type', '') for s in segments]
-        
-        # Check segment types first
-        if all(t == 'ListItem' for t in seg_types):
-            return "list"
-        
-        if all(t == 'LearningObjective' for t in seg_types):
-            return "learning_objective"
-        
-        # Check for theorem/proof (highest priority for academic content)
-        if "theorem" in tags:
-            return "theorem"
-        if "proof" in tags:
-            return "proof"
-        
-        # Check for imperative sentences (indicates procedure)
-        if sentences:
-            imperative_count = sum(1 for s in sentences if s.get('is_imperative', False))
-            if imperative_count > 0 and imperative_count >= len(sentences) / 2:
-                return "procedure"
-        
-        # Check other tags
-        if "definition" in tags:
-            return "definition"
-        if "procedure" in tags:
-            return "procedure"
-        if "example" in tags:
-            return "example"
-        if "exercise" in tags:
-            return "exercise"
-        if "formula" in tags:
-            return "formula"
-        if "summary" in tags:
-            return "summary"
-        
-        return "explanation"
-    
-    def _infer_chunk_type_from_tags(self, tags: List[str]) -> str:
-        """Infer chunk type from tags only (for merged chunks)."""
-        priority = ["theorem", "proof", "definition", "procedure", "example", 
-                    "exercise", "formula", "summary"]
-        for tag in priority:
-            if tag in tags:
-                return tag
-        return "explanation"
-    
-    def _calculate_stats(self, chunks: List[EnrichedChunk]) -> Dict[str, Any]:
-        """Calculate processing statistics including cross-page metrics."""
-        type_counts = {}
-        tag_counts = {}
-        word_counts = []
-        overlap_count = 0
-        imperative_count = 0
-        
-        # Cross-page statistics
-        cross_page_count = 0
-        full_continuation_count = 0
-        partial_continuation_count = 0
-        needs_review_count = 0
-        
-        for chunk in chunks:
-            # Count types
-            type_counts[chunk.chunk_type] = type_counts.get(chunk.chunk_type, 0) + 1
-            # Count tags
-            for tag in chunk.tags:
-                tag_counts[tag] = tag_counts.get(tag, 0) + 1
-            # Word counts
-            word_counts.append(chunk.word_count)
-            # Overlap
-            if chunk.context_prefix:
-                overlap_count += 1
-            # Imperative sentences
-            for sent in chunk.sentences:
-                if sent.get('is_imperative', False):
-                    imperative_count += 1
-            
-            # Cross-page continuation stats
-            if chunk.is_cross_page:
-                cross_page_count += 1
-            if chunk.continuation_type == 'full':
-                full_continuation_count += 1
-            elif chunk.continuation_type == 'partial':
-                partial_continuation_count += 1
-            if chunk.needs_review:
-                needs_review_count += 1
-        
-        return {
-            "chunk_types": type_counts,
-            "tag_distribution": tag_counts,
-            "avg_sentences_per_chunk": sum(len(c.sentences) for c in chunks) / len(chunks) if chunks else 0,
-            "avg_words_per_chunk": sum(word_counts) / len(word_counts) if word_counts else 0,
-            "min_words": min(word_counts) if word_counts else 0,
-            "max_words": max(word_counts) if word_counts else 0,
-            "chunks_with_overlap": overlap_count,
-            "imperative_sentences_detected": imperative_count,
-            # Cross-page continuation stats
-            "cross_page_chunks": cross_page_count,
-            "full_continuations": full_continuation_count,
-            "partial_continuations": partial_continuation_count,
-            "chunks_needing_review": needs_review_count
-        }
     
     def _save_json(self, data: Dict, path: str):
         """Save results to JSON file."""

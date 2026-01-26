@@ -7,11 +7,11 @@ from pathlib import Path
 if __name__ == "__main__":
     sys.path.append(str(Path(__file__).parent.parent))
 
-from semantic_chunker.config import ChunkingConfig
-from semantic_chunker.segmenter import LogicSegmenter
+from .config import ChunkingConfig
+from .segmenter import LogicSegmenter
 
 def main():
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     
     # Base directory for the project (Parser_Chunking)
     base_dir = Path(__file__).resolve().parent.parent
