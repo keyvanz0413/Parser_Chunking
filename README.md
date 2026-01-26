@@ -1,99 +1,134 @@
-# Technical Report: Structural-Semantic Fusion for High-Precision PDF Parsing
+# Synapta Parser & Chunker
 
----
+This project implements a high-precision PDF parsing, structural reconstruction, and semantic segmentation pipeline. It transforms raw PDF documents into context-enriched, semantically tagged chunks suitable for Retrieval-Augmented Generation (RAG) and LLM-based applications.
 
-## 1. Abstract
-This report details the implementation of a high-performance, rule-based pipeline designed to transform large-scale, complex PDF documents into context-enriched, semantically tagged chunks. 
+## 🏗️ Project Structure
 
-**Currently, the system supports two distinct processing schemes:**
-1.  **Rule-Based Scheme** (`semantic_chunker.py`): Optimized for speed and deterministic performance using linguistic heuristics.
-2.  **SBERT-Enhanced Scheme** (`sbert_chunker.py`): Optimized for high precision using Sentence-BERT for semantic refinement and breakpoint detection.
+The project is modularized into two main packages:
 
-By integrating a multi-phase structural reconstruction algorithm with these segmentation engines, the system achieves an **LLM-verified classification accuracy of ~94.5%** for the SBERT-enhanced version.
+1.  **`Semantic_chunker/`**: The core rule-based segmentation engine.
+    *   `main.py`: Entry point for batch processing.
+    *   `segmenter.py`: Orchestrates the chunking logic (`LogicSegmenter`).
+    *   `config.py`: Configuration parameters (`ChunkingConfig`).
+    *   `schema.py`: Data models (`EnrichedChunk`, `Reference`).
+    *   `detectors/`: Modules for detecting page furniture, tags, references, and continuations.
+    *   `analyzers/`: Modules for POS analysis, reading order correction, and content gating.
+    *   `utils/`: Helpers for caption bonding and dehyphenation.
 
-## 2. Introduction
-In typical RAG (Retrieval-Augmented Generation) systems, PDF parsing often suffers from "Contextual Blindness"—where chunks are separated from their parent headings, or "Structural Fragmentation"—where page breaks and column layouts disrupt the natural flow. Our approach, **Structural-Semantic Fusion**, addresses these issues by reconstructing the document's logical architecture before executing semantic segmentation.
+2.  **`Sbert_chunker/`**: An enhanced experimental version using Sentence-BERT for semantic coherence (optional/advanced usage).
 
----
+## 🚀 Key Features
 
-## 2.1 Scheme Comparison
-| Feature | Rule-Based (`semantic_chunker.py`) | SBERT-Enhanced (`sbert_chunker.py`) |
-| :--- | :--- | :--- |
-| **Logic** | Heuristics & POS Tagging | SBERT Embedding + Prototypical Matching |
-| **Speed** | Ultra-Fast (~5 mins / 1k pages) | Fast (~12 mins / 1k pages) |
-| **Hardware** | CPU Optimized | GPU/MPS Optimized |
-| **Precision** | High (~82-85%) | Extreme (~94.5%) |
-| **Use Case** | Fast ingestion / Pre-tagging | Advanced RAG / High-precision training data |
+*   **Structural Reconstruction**: Rebuilds the document hierarchy (headings, lists, tables) before chunking.
+*   **Semantic Segmentation**: Groups text not just by length, but by logical coherence (e.g., keeping a procedure together, spotting theorem/proof blocks).
+*   **Cross-Page Integrity**: Detects and merges paragraphs that span across page boundaries using linguistic and spatial cues.
+*   **Rich Metadata**: Enriches chunks with:
+    *   `heading_path`: The full breadcrumb trail (e.g., "Chapter 1 > 1.2 Asset Classes").
+    *   `tags`: Semantic tags (e.g., `definition`, `theorem`, `procedure`).
+    *   `chunk_type`: Functional classification (e.g., `explanation`, `list`, `table`).
+    *   `doc_zone`: Identifies if content is from the Front Matter, Body, or Back Matter.
 
----
+## 🧠 Semantic Chunking Strategy
 
-## 3. Methodology: Five-Phase Chunking Architecture
-The system employs a deterministic five-phase pipeline to ensure data integrity and structural continuity. Phases 1, 2, and 4 are foundational to both schemes.
+The `LogicSegmenter` uses a multi-phase strategy to create meaningful chunks:
 
-### 3.1 Phase 1: Reading Order & Noise Suppression
-*   **Geometric-Sequential Correction**: The parser identifies bounding box (bbox) coordinates to correct reading order in multi-column layouts, ensuring text flows logically from the bottom of the left column to the top of the right column.
-*   **Furniture Detection (De-noising)**: A frequency-based spatial algorithm identifies "Furniture" elements (running headers, footers, page numbers). By scanning cross-page repetitions, the system prevents non-content metadata from polluting the semantic chunks.
+### 1. Pre-Processing & Corrections
+*   **Reading Order Correction**: Reorders multi-column text and reconstructs the correct flow.
+*   **Furniture Detection**: Removes headers, footers, and page numbers to clean the text.
+*   **Gating**: Identifies the true start of the main body (skipping TOCs, Prefaces) using `ContentGatekeeper`.
 
-### 3.2 Phase 2: Structural Skeleton Reconstruction
-*   **Stateful Heading Stacking**: The system maintains a hierarchy stack (L1–L4). As it traverses the document, every fragment inherits a `heading_path` (e.g., `Chapter 2 > 2.1 The Asset Market`).
-*   **Backfill Corrections**: A "look-ahead" logic detects primary headers that appear unexpectedly in the middle of a page and retroactively updates the context for preceding segments on that page.
+### 2. Structural Bonding
+*   **Caption Bonding (Enhanced)**: Automatically bonds captions (e.g., "Table 1.1") to their corresponding blocks.
+    *   **Relaxed Type Matching**: Handles parser misclassifications (e.g., bonding a "Table" caption to a "Picture" block).
+    *   **Spatial Verification (New)**: Uses bounding box coordinates to verify physical proximity (vertical distance and horizontal overlap) ensuring accurate bonding even in complex layouts.
+*   **List Adsorption**: Groups list items together or adsorbs them into the preceding introductory paragraph.
+*   **Learning Objectives**: Groups extraction of learning objectives into single coherent blocks.
 
-### 3.3 Phase 3: Dynamic Semantic Windowing
-Chunks are not split by arbitrary character counts but by **Semantic Density**.
+### 3. Sentence Role Identification (SRI)
+The `POSAnalyzer` uses spaCy to assign a functional role to every sentence. This granular analysis guides the chunking decision (e.g., a "Definition" starts a new chunk).
 
-#### Option A: Heuristic splitting (`semantic_chunker.py`)
-*   Uses paragraph boundaries and target word counts (~200 words) to create stable, uniform chunks.
+**Supported Sentence Roles:**
+*   **Cognitive**: 
+    *   `Mechanism`: Causal/Systemic logic (Optimized for **Financial Domain** with keywords like *arbitrage, rate, liquidity*).
+    *   `Assumption`: Hypothetical scenarios (Optimized for **Hypothesis Detection** using *Suppose/Assume/Imagine* while filtering out *supposed to*).
+    *   `Topic`, `Definition`, `Explanation`, `Interpretation`, `Conclusion`, `Limitation`, `Contrast`, `Comparison`.
+*   **Data-Driven**: `Evidence` (stats/data), `Formula`, `Reference`, `Theorem`.
+*   **Instructional**: `Procedure` (imperative steps), `Example`, `Application`, `Caution`.
+*   **Structural**: `Question`, `Transition`.
 
-#### Option B: AI-Enhanced splitting (`sbert_chunker.py`)
-*   **Semantic Breakpoint Detection**: Utilizing SBERT embeddings to identify "topical shifts" within paragraphs, ensuring that a single chunk does not span multiple unrelated concepts even if size constraints are met.
-*   **Coherence Optimization**: Strictly enforces semantic similarity thresholds within a chunk.
+*Note: Roles are determined via a priority cascade guided by POS tags and domain-specific heuristics.*
 
-*Both options maintain Phase 2 structural tags (headers, lists, tables) as atomic units.*
+### 4. Cross-Page Continuity
+The `ContinuationDetector` analyzes the end of one page and the start of the next to determine if a paragraph continues. It uses:
+*   **Syntactic Analysis**: Checks for open clauses (e.g., ending with "the", "of").
+*   **Dehyphenation**: Reconstructs words split across lines/pages (e.g., "continu-" + "ation").
 
-### 3.4 Phase 4: Cross-Page Paragraph Recovery
-To maintain sentence integrity across physical boundaries, the **Continuation Detector** evaluates:
-*   **Linguistic Cues**: Detects hyphenated word breaks (e.g., `distribu-` followed by `tion`) and open-clause markers (sentences ending in prepositions).
-*   **Spatial Transitions**: Validates if a break occurs at the geometric bottom of one page and continues at the top of the next.
+### 5. Reference Resolution (New)
+The `ReferenceDetector` connects text to specific structural blocks:
+*   **Explicit**: Resolves "Figure 1.1" or "Table 2" in text to the specific block ID of that figure/table.
+*   **Implicit**: Attempts to resolve "the table below" or "this figure" based on proximity and page layout.
 
-### 3.5 Phase 5: Sentence-Level Enrichment
-Final chunks are post-processed for RAG optimization:
-*   **Contextual Overlap**: Final sentences of a chunk are injected into the following chunk as a `context_prefix`.
-*   **Positional Tagging**: Each sentence is tagged with its relative position (First, Middle, Last).
-*   **Coherence Scoring (SBERT Scheme only)**: Each chunk is assigned a **Semantic Coherence Score** (0.0 - 1.0) using SBERT to validate that all sentences within a chunk are semantically aligned.
+### 6. Composite Semantic Recognition: "Primary Role + Attributes"
+To solve "semantic loss" when a sentence serves multiple functions, the system uses a **Composite Architecture**:
 
----
+*   **Primary Role (Quantitative)**: Standard classification (e.g., `question`).
+*   **Attributes (Qualitative / Sub-tags)**: Secondary semantics stored in `secondary_attributes`.
 
-## 4. Sentence Role Identification (SRI)
-The core intelligence of the system lies in the SRI engine, which classifies sentences into 20+ functional roles.
+#### Example Case: Question + Reference
+When a question requires data from a specific table:
+*   **Role**: `question`
+*   **Secondary Attributes**:
+    *   `has_reference`: `true`
+    *   `ref_target`: `"Table 1.1"`
 
-### 4.1 Layered Detection Logic
-1.  **Linguistic Layer**: Utilizing **spaCy en_core_web_md**, the system performs Part-of-Speech (POS) tagging to identify imperative structures (Commands/Procedures) and statistical markers.
-2.  **Discourse Transition Layer (The "State Machine")**: Inspired by discourse analysis, the system utilizes the `prev_role` to influence the `current_role`. For example, a declarative sentence following an `example` trigger is prioritized as a `mechanism` or `interpretation`.
-3.  **Funnel-Style Priority Cascading**: Unlike flat if-statements, roles are matched via a prioritized cascade where low-level roles (e.g., `explanation`) are progressively refined into specialized roles.
-4.  **Negative Rule Layer (Global Filter)**: A comprehensive exclusion library (e.g., preventing hyphenated words like "day-to-day" from triggering mathematical `formula` tags) is applied as a final global filter, ensuring all candidate roles pass through a noise-suppression gate.
-5.  **Glossary-Style Pattern Recognition**: Specifically handles "Noun [Space] Definition" patterns typical in textbook glossaries, which lack explicit system verbs or connecting phrases like "is defined as."
+**RAG Benefit**: Enables reverse-linking questions to the data sources they rely on (e.g., "Find all questions that use Table 1.1").
 
-### 4.2 Classification Taxonomy Highlights
-*   **Cognitive Roles**: `Topic`, `Definition`, `Explanation`, `Mechanism`, `Interpretation`.
-*   **Data-Driven Roles**: `Evidence` (statistical data), `Formula` (mathematical expressions).
-*   **Instructional Roles**: `Procedure`, `Example`, `Caution`, `Assumption`.
+### 7. Core Segmentation Rules
+The `LogicSegmenter` applies the following rules in order of priority:
 
-### 4.3 Semantic Refinement & Prototype Matching (v2.0 Upgrade)
-To handle cases where rule-based detection is ambiguous (e.g., distinguishing between a general `explanation` and a specific `mechanism`), the system integrates a **Sentence-BERT (SBERT)** refinement layer:
-*   **Max-Similarity Prototypical Matching**: The system maintains a curated library of "Role Prototypes" (130+ samples across Finance & Academic domains). Each candidate sentence is embedded and compared against this support set.
-*   **Nearest-Neighbor Classification**: Instead of a simple centroid comparison, the system uses a winner-take-all similarity approach against all prototype samples, allowing for high-variance linguistic expressions within the same role.
-*   **Probabilistic Smoothing**: If no rule is triggered, the SBERT engine provides a "soft assignment," ensuring 100% coverage of the document text with functional metadata.
+1.  **Cross-Page Continuation (Rule 0)**: High-confidence cross-page merges (detected by `ContinuationDetector`) always take precedence, preventing artificial splits at page boundaries.
+2.  **Header Isolation (Rule 1)**: Structural headers force a new chunk, updating the global `heading_path`.
+3.  **List Handling (Rule 2 & 3)**:
+    *   **Adsorption**: Short Introductory paragraphs can "adsorb" the subsequent list into a single chunk.
+    *   **Grouping**: Consecutive list items are grouped into a single `list` chunk.
+4.  **Block Bonding (Rule 4)**:
+    *   **Captions**: Captions (e.g., "Table 1") are bonded to their structural block (Table/Image).
+    *   **Notes**: Descriptions immediately following a table/image are bonded to it.
+5.  **Academic Blocks (Rule 5)**: Sentences starting with "Theorem", "Lemma", or "Proof" trigger a dedicated chunk to preserve mathematical rigor.
+6.  **Learning Objectives**: Consecutive LOs are grouped; LO headers are merged with their content.
+7.  **Buffer Limit (Rule 6)**: If no logical break is found, chunks are split semantically when the buffer exceeds `MAX_CHUNK_WORDS`.
 
----
+## 🛠️ Usage
 
-## 5. Evaluation and Results
-The system’s performance was validated through **LLM-Based Stratified Audit** on a 1073-page textbook (*Investments*). 
-*   **Accuracy**: Achieved **~94.5% precision** as verified by an LLM-based semantic review (200 random samples). The SBERT refinement layer specifically resolved ~12% of previously ambiguous `explanation` tags into high-value cognitive roles (`mechanism`, `assumption`, `limitation`).
-*   **Rule Robustness**: Significant improvement in "Scenario Setup" detection (e.g., correctly tagging "Suppose your client..." as `assumption` despite numerical content) and "Glossary Style" definitions.
-*   **Efficiency**: Total processing time for 1,000+ pages averaged **12 minutes** on local hardware (MPS accelerated), including SBERT embedding generation.
-*   **Reliability**: Significant reduction in "Hallucinated Context" during RAG retrieval due to 100% path coverage.
+### Installation
+Ensure you have the required dependencies installed (including `spacy` and `en_core_web_md`):
+```bash
+pip install -r requirements.txt
+python -m spacy download en_core_web_md
+```
 
----
+### Running the Chunker
+To run the standard semantic chunker on processed JSON files (from `parser_docling`):
 
-## 6. Conclusion
-The Synapta Parser & Logic Segmenter demonstrates that high-precision document chunking can be achieved through a fusion of structural heuristics and linguistic pattern matching. By treating the document as a logical tree rather than a flat string, the system provides a robust foundation for advanced RAG applications in high-stakes domains like finance and education.
+```bash
+# From the project root (Parser_Chunking/)
+python -m semantic_chunker.main
+```
+
+This will:
+1.  Read JSON inputs from `outputs/Docling_json/`.
+2.  Process each file using the `LogicSegmenter`.
+3.  Save enriched chunks to `outputs/Chunks_Semantic/`.
+
+### Configuration
+You can tune the chunking behavior in `semantic_chunker/config.py`:
+*   `MIN_CHUNK_WORDS`: Merge chunks smaller than this.
+*   `MAX_CHUNK_WORDS`: Split chunks larger than this.
+*   `ENABLE_OVERLAP`: Add previous context to chunks for RAG.
+*   `ENABLE_DEHYPHENATION`: Turn linguistic repair on/off.
+
+## 📊 Statistics
+The system provides detailed processing stats in the output JSON, including:
+*   Number of chunks generated.
+*   Count of cross-page continuations detected.
+*   Distribution of chunk types and tags.

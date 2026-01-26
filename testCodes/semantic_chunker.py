@@ -72,18 +72,41 @@ class ChunkingConfig:
     
     # Column detection thresholds
     COLUMN_DETECTION_THRESHOLD = 0.45        # x < page_width * threshold => left column
+    ENABLE_COLUMN_ISOLATION = True          # Force spanning -> left -> right order
+    COLUMN_MERGE_GUARD = True               # Prevents merging segments from different columns
+    SEGMENT_ID_GAP_THRESHOLD = 8            # Max ID difference for merging
     PAGE_WIDTH_DEFAULT = 612.0               # Default PDF page width (8.5" × 72dpi)
     PAGE_HEIGHT_DEFAULT = 792.0              # Default PDF page height (11" × 72dpi)
     
-    # Furniture detection settings
-    FURNITURE_TOP_BAND = 0.10                # Page top 10% considered edge zone
-    FURNITURE_BOTTOM_BAND = 0.10             # Page bottom 10% considered edge zone
+    # Furniture detection settings (Safe Zone)
+    FURNITURE_TOP_BAND = 0.08                # Page top 8% considered header zone
+    FURNITURE_BOTTOM_BAND = 0.08             # Page bottom 8% considered footer zone
+    FURNITURE_LEFT_BAND = 0.05               # Left margin 5% (Sidebars)
+    FURNITURE_RIGHT_BAND = 0.05              # Right margin 5% (Sidebars)
     FURNITURE_REPEAT_THRESHOLD = 0.20        # String appearing on 20%+ pages is "repeated"
-    FURNITURE_MAX_WORDS = 5                  # Short text threshold for furniture
+    FURNITURE_MAX_WORDS = 8                  # Short text threshold for furniture
     FURNITURE_MIN_PAGES_FOR_STATS = 10       # Minimum pages to compute frequency stats
     
     # Dehyphenation settings
     ENABLE_DEHYPHENATION = True              # Enable cross-page hyphen repair
+
+    # Content Gating settings (New)
+    ENABLE_CONTENT_GATING = True             # Enable main body vs front/back matter gating
+    STRIP_FRONT_MATTER = False               # If True, discard front matter instead of labeling
+    
+    # Gating Patterns (Regex)
+    MAIN_BODY_START_PATTERNS = [
+        r'^(?:Chapter|CHAPTER|Section|SECTION)\s*(?:1|I|ONE)\b',
+        r'^1\.\s+[A-Z\u4e00-\u9fa5]',
+        r'^第[一1]章'
+    ]
+    BACK_MATTER_PATTERNS = [
+        r'^(?:Index|Bibliography|References|Appendix|Appendices)\b',
+        r'^(?:索引|参考文献|附录|后记)'
+    ]
+    GATING_SCAN_LIMIT_PAGE = 100             # Max page to search for Main Body start
+    GATING_MIN_BODY_OFFSET = 2               # Min pages after last TOC before body start
+    GATING_L1_DENSITY_THRESHOLD = 3          # Headers in 5 pages window to consider as TOC
 
 
 
@@ -160,6 +183,7 @@ class EnrichedChunk:
     merge_evidence: Dict[str, Any] = field(default_factory=dict)
     # NEW: Reference detection
     references: List[Reference] = field(default_factory=list)
+    doc_zone: str = "body"      # "front", "body", "back"
     
 
 # =============================================================================
@@ -267,72 +291,95 @@ class FurnitureDetector:
         Determine if a segment is furniture (page decoration).
         
         Returns True if the segment matches furniture criteria based on:
-        - Position (in edge band)
+        - Hard Safe-Zone check (Any content in edge bands is furniture)
         - Cross-page frequency (repeated across many pages)
         - Lexical patterns (matches known furniture phrases)
         - Semantic weakness (short, non-substantive content)
         """
-        if seg.get('type') not in ['Header', 'Paragraph', 'Text']:
+        if seg.get('type') not in ['Header', 'Paragraph', 'Text', 'ListItem']:
             return False
-        
+            
         text = seg.get('text', '').strip()
         if not text:
             return False
-        
-        word_count = len(text.split())
-        
-        # Feature 1: Check known furniture patterns (highest priority)
+            
+        # Feature 0: Hard Safe-Zone Check (Strongest Feature)
+        # If content is in the edge margins, it is by definition page furniture
+        # (Header, Footer, or Sidebar), regardless of its length or content.
+        if self._in_edge_band(seg):
+            # NEW: Protection for potential references in sidebars/headers
+            # If it matches a reference pattern (e.g. "Table 1.1"), it's NOT furniture
+            if self._matches_furniture_pattern(text): # Using pattern check
+                self._stats["furniture_detected"] += 1
+                self._stats["by_position"] += 1
+                return True
+            
+            # Additional check: If it looks like a block caption (Table X), don't mark as furniture
+            if re.search(r'^(?:Table|Figure|Fig\.?|Equation|Eq\.?)\s+\d+', text, re.I):
+                return False
+                
+            self._stats["furniture_detected"] += 1
+            self._stats["by_position"] += 1
+            return True
+            
+        # Feature 1: Check known furniture patterns
         if self._matches_furniture_pattern(text):
             self._stats["furniture_detected"] += 1
             self._stats["by_pattern"] += 1
             return True
-        
-        # Feature 2: Check position + frequency (for scanned documents)
-        if self._scanned and self._total_pages >= self.config.FURNITURE_MIN_PAGES_FOR_STATS:
-            in_edge = self._in_edge_band(seg)
             
-            if in_edge and word_count <= self.config.FURNITURE_MAX_WORDS:
-                norm_text = self._normalize_text(text)
-                page_count = self._frequency_map.get(norm_text, 0)
-                
-                if page_count > 0:
-                    repeat_ratio = page_count / self._total_pages
-                    
-                    if repeat_ratio >= self.config.FURNITURE_REPEAT_THRESHOLD:
-                        self._stats["furniture_detected"] += 1
-                        self._stats["by_frequency"] += 1
-                        return True
-        
-        # Feature 3: Position-only detection for very short edge content
-        if word_count <= 2 and self._in_edge_band(seg):
-            # Single word or two words at page edge - likely page number or marker
-            if self._is_trivial_content(text):
-                self._stats["furniture_detected"] += 1
-                self._stats["by_position"] += 1
-                return True
+        # Feature 2: Check cross-page frequency (for repeated running elements)
+        if self._scanned and self._total_pages >= self.config.FURNITURE_MIN_PAGES_FOR_STATS:
+            norm_text = self._normalize_text(text)
+            page_count = self._frequency_map.get(norm_text, 0)
+            
+            if page_count > 0:
+                repeat_ratio = page_count / self._total_pages
+                if repeat_ratio >= self.config.FURNITURE_REPEAT_THRESHOLD:
+                    self._stats["furniture_detected"] += 1
+                    self._stats["by_frequency"] += 1
+                    return True
         
         return False
     
     def _in_edge_band(self, seg: Dict) -> bool:
-        """Check if segment is in top or bottom edge band of page."""
+        """
+        Check if segment is in prohibited 'Safe Zone' edge bands.
+        
+        Includes Top/Bottom (Headers/Footers) and Left/Right (Sidebars).
+        """
         bbox = seg.get('bbox')
         if not bbox or len(bbox) < 4:
             return False
+            
+        # Get dimensions from config
+        pw = self.config.PAGE_WIDTH_DEFAULT
+        ph = self.config.PAGE_HEIGHT_DEFAULT
         
-        page_height = self.config.PAGE_HEIGHT_DEFAULT
-        y_top = bbox[1]  # Top of segment (PDF y-coordinate)
+        # Bbox: [x_left, y_top, x_right, y_bottom] (Standard PDF coordinates used in this script)
+        # Note: In this script's coordinate system, y_top is the higher value.
+        x_left, y_top, x_right, y_bottom = bbox[0], bbox[1], bbox[2], bbox[3]
         
-        # Top band check (high y value in PDF coordinates = top of page)
-        top_threshold = page_height * (1 - self.config.FURNITURE_TOP_BAND)
+        # 1. Top band check (Header Zone)
+        top_threshold = ph * (1 - self.config.FURNITURE_TOP_BAND)
         if y_top > top_threshold:
             return True
-        
-        # Bottom band check (low y value = bottom of page)
-        bottom_threshold = page_height * self.config.FURNITURE_BOTTOM_BAND
-        y_bottom = bbox[3] if len(bbox) > 3 else y_top
+            
+        # 2. Bottom band check (Footer Zone)
+        bottom_threshold = ph * self.config.FURNITURE_BOTTOM_BAND
         if y_bottom < bottom_threshold:
             return True
-        
+            
+        # 3. Left margin check (Sidebar Zone)
+        left_threshold = pw * self.config.FURNITURE_LEFT_BAND
+        if x_right < left_threshold: # Entire block is within left margin
+            return True
+            
+        # 4. Right margin check (Sidebar Zone)
+        right_threshold = pw * (1 - self.config.FURNITURE_RIGHT_BAND)
+        if x_left > right_threshold: # Entire block is within right margin
+            return True
+            
         return False
     
     def _matches_furniture_pattern(self, text: str) -> bool:
@@ -1077,6 +1124,93 @@ class ReferenceDetector:
         return self._stats.copy()
 
 
+class ContentGatekeeper:
+    """
+    Intelligent document gating to identify main body content vs front/back matter.
+    
+    Uses sequential pattern recognition to distinguish between isolated references 
+    in front matter and the actual start of structured chapters.
+    """
+    def __init__(self, config: ChunkingConfig = None):
+        self.config = config or ChunkingConfig()
+        self.start_id = None
+        self.end_id = None
+        self.detected_pattern = None
+
+    def analyze(self, segments: List[Dict], detected_toc_pages: set = None) -> Dict[str, Any]:
+        """
+        Scan segments to identify logical start and end of main content.
+        
+        Algorithm:
+        1. Identify level-1 headers.
+        2. Filter out headers on known TOC pages or in high-density TOC-like zones.
+        3. Enforce a minimum page gap after the first continuous block of TOC pages.
+        4. Match against common chapter/section starting patterns.
+        """
+        all_toc_pages = (detected_toc_pages or set()).copy()
+        l1_headers = [s for s in segments if s.get('type') == 'Header' and s.get('level') == 1]
+        
+        if not l1_headers:
+            return {"start_id": None, "end_id": None}
+
+        # Calculate the end of the INITIAL TOC/Preface block
+        sorted_toc = sorted([p for p in all_toc_pages if p < self.config.GATING_SCAN_LIMIT_PAGE])
+        effective_toc_end = 0
+        if sorted_toc:
+            effective_toc_end = sorted_toc[0]
+            for j in range(1, len(sorted_toc)):
+                if sorted_toc[j] - sorted_toc[j-1] > 8: # Gap > 8 pages likely means end of TOC
+                    break
+                effective_toc_end = sorted_toc[j]
+        
+        # Start scanning for body AFTER the initial TOC block
+        safe_start_page = effective_toc_end + 1
+
+        # 1. Detect Main Body Start
+        best_start_idx = -1
+        logger.info(f"Gatekeeper: Scanning {len(l1_headers)} L1 headers. TOC pages: {sorted(list(all_toc_pages))}. safe_start_page: {safe_start_page}")
+        
+        for i, header in enumerate(l1_headers):
+            text = header.get('text', '').strip()
+            page = header.get('page', 0)
+            
+            # Skip if on a known TOC page OR before the end of the initial TOC block
+            if page in all_toc_pages or page < safe_start_page:
+                logger.debug(f"Gatekeeper: Skipping page {page} (TOC/Front-Matter zone)")
+                continue
+                
+            # Stop searching if we're too deep into the document
+            if page > self.config.GATING_SCAN_LIMIT_PAGE:
+                logger.debug(f"Gatekeeper: Skipping page {page} (> scan limit {self.config.GATING_SCAN_LIMIT_PAGE})")
+                continue
+                
+            logger.info(f"Gatekeeper: Checking header '{text}' at page {page}")
+            for pattern in self.config.MAIN_BODY_START_PATTERNS:
+                if re.search(pattern, text, re.IGNORECASE):
+                    self.start_id = header.get('segment_id')
+                    best_start_idx = i
+                    self.detected_pattern = pattern
+                    logger.info(f"Gatekeeper: Main Body start matches pattern '{pattern}' at page {page}")
+                    break
+            if self.start_id:
+                break
+
+        # 2. Detect Back Matter Start
+        if self.start_id:
+            # Look for back-matter patterns among headers following the start
+            for header in l1_headers[best_start_idx + 1:]:
+                text = header.get('text', '').strip()
+                for pattern in self.config.BACK_MATTER_PATTERNS:
+                    if re.search(pattern, text, re.IGNORECASE):
+                        self.end_id = header.get('segment_id')
+                        logger.info(f"Gatekeeper: Potential Back Matter start at '{text}' ({self.end_id})")
+                        break
+                if self.end_id:
+                    break
+
+        return {"start_id": self.start_id, "end_id": self.end_id}
+
+
 class ReadingOrderCorrector:
     """
     Three-Phase Pipeline for Reading Order and Heading Path Correction.
@@ -1107,12 +1241,13 @@ class ReadingOrderCorrector:
             "backfill_corrections": 0
         }
     
-    def process(self, segments: List[Dict]) -> List[Dict]:
+    def process(self, segments: List[Dict], gating_info: Dict = None) -> List[Dict]:
         """
         Apply four-phase correction pipeline to segments.
         
         Args:
             segments: List of segment dictionaries from parser_docling
+            gating_info: Optional dict with start_id and end_id for main body
             
         Returns:
             Corrected segments with proper reading order and heading paths
@@ -1144,7 +1279,7 @@ class ReadingOrderCorrector:
         
         # Phase 2: Heading Stack Reconstruction
         if self.config.ENABLE_HEADING_RECONSTRUCTION:
-            result = self._phase2_rebuild_heading_paths(result)
+            result = self._phase2_rebuild_heading_paths(result, gating_info)
             logger.info(f"Phase 2: Reconstructed {self._stats['paths_reconstructed']} heading paths")
         
         # Phase 3: Same-page Backfilling
@@ -1205,41 +1340,42 @@ class ReadingOrderCorrector:
             for seg in page_segs:
                 bbox = seg.get('bbox')
                 if not bbox or len(bbox) < 4:
+                    seg['column_index'] = -1
                     spanning.append(seg)
                     continue
                 
                 x_left, y_top, x_right, y_bottom = bbox[0], bbox[1], bbox[2], bbox[3]
-                seg_width = x_right - x_left
                 
                 # Check if segment spans both columns (wide element)
                 if x_left < mid_x and x_right > page_width * 0.55:
+                    seg['column_index'] = -1
                     spanning.append(seg)
                 elif x_left < mid_x:
+                    seg['column_index'] = 0
                     left_col.append(seg)
                 else:
+                    seg['column_index'] = 1
                     right_col.append(seg)
             
             # Sort each group by y-coordinate (PDF y: higher = top of page)
-            # Sort descending so top-of-page comes first
             left_col.sort(key=lambda s: -s.get('bbox', [0, 0, 0, 0])[1])
             right_col.sort(key=lambda s: -s.get('bbox', [0, 0, 0, 0])[1])
             spanning.sort(key=lambda s: -s.get('bbox', [0, 0, 0, 0])[1])
             
-            # Improved merge strategy for textbook layouts
-            # Instead of "spanning + left + right", we merge by y-position
-            # This ensures continuation paragraphs stay in correct reading order
-            
-            # Combine all segments and sort by y (top to bottom)
-            all_segs = []
-            for seg in left_col + right_col + spanning:
-                y_top = seg.get('bbox', [0, 0, 0, 0])[1]
-                col_idx = seg.get('column_index', -1)
-                # For same y-level, left column comes before right
-                sort_key = (-y_top, 0 if col_idx <= 0 else 1)
-                all_segs.append((sort_key, seg))
-            
-            all_segs.sort(key=lambda x: x[0])
-            reordered = [seg for _, seg in all_segs]
+            # Determine ordering strategy
+            if self.config.ENABLE_COLUMN_ISOLATION:
+                # Absolute Isolation: Spanning -> Left Column -> Right Column
+                reordered = spanning + left_col + right_col
+            else:
+                # Interleaved merge by y-position (original behavior)
+                all_segs = []
+                for seg in left_col + right_col + spanning:
+                    y_top = seg.get('bbox', [0, 0, 0, 0])[1]
+                    col_idx = seg.get('column_index', -1)
+                    sort_key = (-y_top, 0 if col_idx <= 0 else 1)
+                    all_segs.append((sort_key, seg))
+                all_segs.sort(key=lambda x: x[0])
+                reordered = [seg for _, seg in all_segs]
             
             # Check if reordering actually changed anything
             original_ids = [s.get('segment_id') for s in page_segs]
@@ -1257,33 +1393,59 @@ class ReadingOrderCorrector:
     # Phase 2: Heading Stack Reconstruction (Ancestor Stack Algorithm)
     # =========================================================================
     
-    def _phase2_rebuild_heading_paths(self, segments: List[Dict]) -> List[Dict]:
+    def _phase2_rebuild_heading_paths(self, segments: List[Dict], gating_info: Dict = None) -> List[Dict]:
         """
         Rebuild heading_path for all segments using the ancestor stack algorithm.
         
         Algorithm:
         1. Maintain a stack of (level, text) tuples representing current heading hierarchy
-        2. For each Header segment:
-           - Skip noise headers (concluded, continued, etc.) - they don't affect hierarchy
-           - Pop all entries with level >= current level
-           - Push current header onto stack
-        3. For each non-Header segment:
-           - Inherit the current stack's path
-        
-        This ensures consistent hierarchy regardless of original parsing order.
+        2. Handle Main Body Gating:
+           - Track if we have entered main content or back matter.
+           - Reset stack upon entering main body to prevent hierarchy contamination.
+           - Assign virtual paths (Front Matter / Back Matter) for segments outside body.
+        3. For each Header segment:
+           - Skip noise headers.
+           - Update hierarchy stack and generate path.
+        4. For each non-Header segment:
+           - Inherit current path or virtual path.
         """
-        # Use furniture detection from Pre-Phase (is_furniture flag)
-        # No longer need inline noise pattern compilation
-        
         stack = []  # [(level, text), ...]
         
+        start_id = (gating_info or {}).get('start_id')
+        end_id = (gating_info or {}).get('end_id')
+        
+        has_entered_body = False
+        has_entered_back = False
+        
+        # If no gating is activated, start in body immediately.
+        # If gating IS activated but no start matches found after analysis, 
+        # we also default to body to avoid hiding the whole document (fail-safe).
+        if not self.config.ENABLE_CONTENT_GATING or not start_id:
+            has_entered_body = True
+            if self.config.ENABLE_CONTENT_GATING:
+                logger.warning("Gating: Main body start pattern NOT found. Defaulting to body.")
+
         for seg in segments:
+            seg_id = seg.get('segment_id')
+            
+            # Gating State Machine
+            if self.config.ENABLE_CONTENT_GATING:
+                if seg_id == start_id:
+                    has_entered_body = True
+                    has_entered_back = False
+                    stack = []  # HARD RESET: Clean stack upon entering main content
+                    logger.info(f"Gating: Found start_id {seg_id} at page {seg.get('page')}. Entering Body.")
+                
+                if seg_id == end_id:
+                    has_entered_body = False
+                    has_entered_back = True
+                    stack = []  # RESET: Clean stack upon entering back matter
+                    logger.debug(f"Gating: Entering Back Matter at {seg_id}")
+
             if seg.get('type') == 'Header':
                 # Skip furniture/noise headers - they don't affect hierarchy
-                # is_furniture is set by FurnitureDetector in Pre-Phase
                 if seg.get('is_furniture', False) or seg.get('is_noise_header', False):
-                    # Furniture inherits current path, doesn't change it
-                    seg['heading_path'] = self.PATH_SEPARATOR.join([t for _, t in stack])
+                    seg['heading_path'] = self._get_virtual_path(stack, has_entered_body, has_entered_back)
                     if seg.get('heading_path'):
                         seg['full_context_text'] = f"[Path: {seg['heading_path']}] {seg.get('text', '')}"
                     continue
@@ -1301,27 +1463,43 @@ class ReadingOrderCorrector:
                 
                 # Update segment's heading_path
                 old_path = seg.get('heading_path', '')
-                new_path = self.PATH_SEPARATOR.join([t for _, t in stack])
+                new_path = self._get_virtual_path(stack, has_entered_body, has_entered_back)
                 
                 if old_path != new_path:
                     self._stats['paths_reconstructed'] += 1
                     seg['heading_path'] = new_path
-                    seg['heading_path_original'] = old_path  # Keep original for debugging
+                    seg['heading_path_original'] = old_path
             else:
-                # Non-header: inherit current stack's path
+                # Non-header: inherit path
                 old_path = seg.get('heading_path', '')
-                new_path = self.PATH_SEPARATOR.join([t for _, t in stack])
+                new_path = self._get_virtual_path(stack, has_entered_body, has_entered_back)
                 
                 if old_path != new_path:
                     self._stats['paths_reconstructed'] += 1
                     seg['heading_path'] = new_path
                     seg['heading_path_original'] = old_path
             
+            # Update doc_zone metadata
+            seg['doc_zone'] = "body" if has_entered_body else ("back" if has_entered_back else "front")
+            
             # Update full_context_text
             if seg.get('heading_path'):
                 seg['full_context_text'] = f"[Path: {seg['heading_path']}] {seg.get('text', '')}"
         
         return segments
+
+    def _get_virtual_path(self, stack: List, in_body: bool, in_back: bool) -> str:
+        """Construct path string with virtual pre-fixes for out-of-body zones."""
+        path_text = self.PATH_SEPARATOR.join([t for _, t in stack])
+        
+        if in_body:
+            return path_text
+        elif in_back:
+            prefix = "Back Matter"
+            return f"{prefix}{self.PATH_SEPARATOR}{path_text}" if path_text else prefix
+        else:
+            prefix = "Front Matter"
+            return f"{prefix}{self.PATH_SEPARATOR}{path_text}" if path_text else prefix
     
     # =========================================================================
     # Phase 3: Same-Page Backfilling for Late-Discovered Headers
@@ -1466,15 +1644,16 @@ class TagDetector:
             r"^Example\s*\d*",
             r"\bcase\s+study\b",
         ],
-        # Formula/Equation patterns (refined to reduce false positives)
-        "formula": [
-            r"\bequation\s+\d+",
-            r"\bformula\s+(?:for|to)\b",
-            r"\bwhere\s+[A-Z]\s*=",
-            r"\b[A-Z]\s*=\s*[A-Z\d]",  # Variable assignments
-            r"∑|∫|∂|√",  # Math symbols
-            r"\bderivative\s+of\b",
-            r"\bintegral\s+of\b",
+        # Reference patterns (Figure/Table/Equation) - Enhanced for Linkage
+        "reference": [
+            r"\b(?:figure|fig\.?|table|tbl\.?|exhibit|chart|appendix|box|equation|eq\.?)\s+\d+",
+            r"\bsee\s+(?:figure|fig\.?|table|tbl\.?|eq\.?)\b",
+            r"\bas\s+shown\s+in\b",
+            r"\billustrated\s+in\b",
+            r"\b(?:referenced|discussed|presented)\s+in\b",
+            r"\[(?:Table|Figure|Eq\.?)\s+\d+\]",      # Bracketed references
+            r"\((?:see|refer\s+to)?\s*(?:Figure|Fig\.?|Table|Tbl\.?|Equation|Eq\.?)\s+\d+\)", # Parenthetical
+            r"^(?:Table|Figure|Fig\.?|Equation|Eq\.?)\s+\d+", # Block Captions at start of segment
         ],
         # Procedure/Steps patterns (enhanced with imperative detection)
         "procedure": [
@@ -1531,30 +1710,47 @@ class TagDetector:
             r"\bnote\s+that\b",
             r"\bimportant:\b",
         ],
-        # Visual reference patterns
-        "visual_ref": [
-            r"\bfigure\s+\d+",
-            r"\btable\s+\d+",
-            r"\bexhibit\s+\d+",
-            r"\bsee\s+(?:figure|table)\b",
-            r"\bas\s+shown\s+in\b",
-            r"\billustrated\s+in\b",
-        ],
-        # Exercise/Problem patterns (NEW)
-        "exercise": [
-            r"^(?:Exercise|Problem|Question)\s*\d*",
-            r"\bsolve\s+(?:the|for)\b",
-            r"\bfind\s+the\s+value\b",
-            r"\bcalculate\s+the\b",
-            r"\bdetermine\s+(?:the|whether)\b",
-        ],
-        # Assumption patterns (NEW)
+        # Assumption patterns
         "assumption": [
             r"\bassume\s+(?:that|we)\b",
             r"\bassuming\b",
             r"\bgiven\s+that\b",
             r"\bsuppose\s+(?:that|we)\b",
             r"\bunder\s+the\s+assumption\b",
+        ],
+        # Evidence patterns (Data-driven)
+        "evidence": [
+            r'\b\d+(?:\.\d+)?\s*(?:%|percent)\b',
+            r'\b(?:p\s*[<>=]\s*[\d.]+|significant(?:ly)?)\b',
+            r'\b(?:correlation|r\s*=|R²\s*=)\b',
+            r'\b(?:increase[ds]?|decrease[ds]?|grew|rose|fell|declined)\s+(?:by|to)\s+[\d.]+',
+            r'\$[\d,]+(?:\.\d+)?(?:\s*(?:million|billion|trillion))?',
+            r'\b\d+\s*(?:bps|basis\s+points?|bp)\b',
+            r'\b(?:mean|median|average|std|standard\s+deviation)\s*[=:\s]*[\d.]+',
+        ],
+        # Interpretation patterns
+        "interpretation": [
+            r"\b(this\s+(?:means|implies|suggests)|interpret|in\s+other\s+words|effectively)\b",
+        ],
+        # Conclusion/Summary patterns
+        "conclusion": [
+            r"\b(therefore|thus|hence|in\s+conclusion|as\s+a\s+result|consequently|overall|ultimately|in\s+short|the\s+lesson|takeaway|the\s+result\s+is)\b",
+            r"^Summary\b",
+            r"\bin\s+summary\b",
+        ],
+        # Mechanism patterns (Causal chains / System operation)
+        "mechanism": [
+            r"\b(?:transmission|arbitrage|leverage|fluctuat(?:e|es|ing|ion))\b", # High weight
+            r"\b(?:leads?\s+to|caus(?:e|es|ing)|result(?:s|ing)\s+in|dri(?:ve|ves|ving)|trigge(?:r|rs|ring)|due\s+to|because\s+of)\b",
+            r"\b(?:if|when).*(?:then|lead|result|cause|driven|triggered)\b",
+            r"\b(?:impact(?:s|ing)?|influenc(?:e|es|ing)|affect(?:s|ing)?)\b",
+            r"\b(?:mechanism|operation|functionality|process|result)\b", # Standard/Low weight
+        ],
+        # Contrast patterns (Intra-sentence opposing logic)
+        "contrast": [
+            r"\b(?:but|however|although|even\s+though|whereas|despite|nevertheless|nonetheless|conversely|on\s+the\s+contrary)\b",
+            r"\b(?:instead\s+of|rather\s+than|as\s+opposed\s+to)\b",
+            r"\b(?:while|yet)\b.*,", # "While X, Y" or "X, yet Y"
         ],
     }
     
@@ -1670,67 +1866,38 @@ class POSAnalyzer:
         'specify', 'understand', 'outline', 'point'
     }
     
+    # Priority-ordered roles for sequential detection
+    ROLE_PRIORITY = [
+        "reference", "theorem", "definition", "assumption", 
+        "conclusion", "contrast", "comparison", "evidence", 
+        "procedure", "mechanism", "interpretation", "limitation", 
+        "application", "example"
+    ]
+
     def __init__(self, model_name: str = "en_core_web_md"):
         global nlp
         if nlp is None:
             try:
                 import spacy
                 nlp = spacy.load(model_name)
-                logger.info(f"Loaded spaCy model: {model_name}")
             except Exception as e:
-                error_msg = (
-                    f"CRITICAL ERROR: Could not load spaCy model '{model_name}': {e}. "
-                    f"POS analysis and sentence segmentation will fail. "
-                    f"Please run: python -m spacy download {model_name}"
-                )
-                logger.critical(error_msg)
-                raise RuntimeError(error_msg) from e
+                raise RuntimeError(f"Could not load spaCy: {e}") from e
         self.nlp = nlp
         self.tag_detector = TagDetector()
         
         # Compile patterns for efficiency
-        self._evidence_patterns = [re.compile(p, re.IGNORECASE) for p in self.EVIDENCE_PATTERNS]
         self._short_exceptions = [re.compile(p, re.IGNORECASE) for p in self.SHORT_SENTENCE_EXCEPTIONS]
-
-        # NEW: Contextual Transition Logic (Pattern Detection)
-        # Defines roles that are likely to follow a specific role
-        self.EXPECTED_SEQUENCES = {
-            'topic': ['explanation', 'definition', 'procedure', 'question'],
-            'definition': ['explanation', 'interpretation', 'example'],
-            'example': ['explanation', 'evidence', 'formula', 'interpretation'],
-            'evidence': ['interpretation', 'conclusion', 'comparison'],
-            'procedure': ['procedure', 'example', 'caution'],
-            'assumption': ['formula', 'mechanism', 'procedure'],
-            'question': ['explanation', 'topic', 'procedure'],
-        }
-
-        # NEW: Negative rules to catch false positives in context
-        self.NEGATIVE_CONTEXT_RULES = {
-            'example': [r'^\s*the\s+following\b', r'^\s*note\s+that\b'], 
-            'definition': [r'\bin\s+this\s+case\b', r'\bfor\s+example\b'],
-            'formula': [
-                r'\b\d+[- ](?:year|month|day|week|page|edition|class)\b', # Descriptions: "10-year", "3rd edition"
-                r'\b(?:pp\.|pages?)\s+\d+\b',                           # Page references
-                r'\b(?:19|20)\d{2}\b',                                  # Years (1990, 2021)
-                r'^[A-Z]\.\s'                                           # List markers like "A. "
-            ],
-            'mechanism': [
-                r'^(?:therefore|thus|hence|consequently)\b',            # Likely a conclusion instead
-                r'\b(?:see|refer\s+to|illustrated\s+in)\b',             # Likely a reference
-                r'\bthe\s+(?:lesson|summary|takeaway)\b'                # Conclusion marker
-            ],
-            'conclusion': [
-                r'\bfor\s+example\b',                                   # Example inside summary
-                r'\bif\s+we\s+assume\b'                                 # Assumption inside summary
-            ],
-            'topic': [
-                r'\b(?:http|www|mhhe|com\b)',                           # URLs/Websites
-                r'^(?:because|although|since|whereas|while|if)\b',      # Subordinating conjunctions (unlikely topics)
-                r'\b(?:all\s+rights\s+reserved|copyright)\b'            # Boilerplate
-            ]
-        }
+        self._boilerplate = [
+            re.compile(r"^\s*(see\s+(?:also|below|above)|continued|ibid)\s*$", re.I),
+            re.compile(r"\b(?:https?://|www\.|mhhe\.com)\b", re.I),
+            re.compile(r"\b(?:all\s+rights\s+reserved|copyright)\b", re.I),
+            re.compile(r"\bmcgraw\s*hill\b", re.I)
+        ]
     
-    def analyze_sentences(self, text: str, heading_path: str = "") -> List[Dict[str, Any]]:
+    
+    def analyze_sentences(self, text: str, heading_path: str = "", 
+                         forced_role: Optional[str] = None,
+                         chunk_type: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Analyze text and return sentences with roles.
         
@@ -1739,15 +1906,18 @@ class POSAnalyzer:
         Args:
             text: The text to analyze
             heading_path: The heading path for context (e.g., "Chapter 1 > Examples")
+            forced_role: Optional role to force for all sentences
+            chunk_type: Optional chunk type to influence role determination
         
-        Roles (15 types):
+        Roles (17 types):
         - topic: Introduces main idea
         - definition: Concept definitions
         - example: Examples and illustrations
         - evidence: Data, statistics, measurements (NEW)
-        - formula: Mathematical expressions
+        - theorem: Academic theorems, lemmas, or propositions (NEW)
         - procedure: Step-by-step instructions
-        - mechanism: How something works
+        - mechanism: Causal chains and system operation (NEW)
+        - contrast: Intra-sentence opposing logic (NEW)
         - assumption: Prerequisites/conditions
         - interpretation: Explaining meaning
         - limitation: Constraints/boundaries
@@ -1796,13 +1966,25 @@ class POSAnalyzer:
                 is_first=(i == 0),
                 is_last=(i == total_sentences - 1),
                 form=form,
-                prev_role=prev_role  # NEW: Pass context
+                prev_role=prev_role,
+                chunk_type=chunk_type,
+                heading_path=heading_path
             )
             
+            # Forced Role Linkage: Override role if forced or if vague in structural blocks
+            if forced_role:
+                role = forced_role
+            elif heading_hint == "header" and role == "explanation":
+                role = "topic"
+            
+            # Detect all applicable tags for this sentence
+            sentence_tags = self.tag_detector.detect_tags(sent_text)
+
             sentences.append({
                 "text": sent_text,
-                "role": role,           # Backward compatible
-                "form": form,           # NEW: sentence form
+                "role": role,
+                "tags": sentence_tags,  # NEW: Preserve all semantic tags
+                "form": form,
                 "pos_tags": pos_tags[:10],
                 "is_imperative": is_imperative
             })
@@ -1919,155 +2101,63 @@ class POSAnalyzer:
                         is_imperative: bool, heading_hint: Optional[str] = None,
                         relative_pos: float = 0.5, is_first: bool = False,
                         is_last: bool = False, form: str = "declarative",
-                        prev_role: Optional[str] = None) -> str:
-        """
-        Determine sentence role/function with enhanced context awareness.
-        
-        Enhanced with:
-        - Pattern Recognition: Uses prev_role to boost/penalize candidate roles
-        - Form-aware role detection (interrogative -> question)
-        - Evidence detection (statistics, percentages, trends)
-        - Heading context (chapter/section hints)
-        - Sentence position (first/last/relative)
-        - Short sentence exception handling
-        """
-        text_lower = text.lower()
+                        prev_role: Optional[str] = None,
+                        chunk_type: Optional[str] = None,
+                        heading_path: Optional[str] = None) -> str:
+        """Determines role using priority-ordered rules and TagDetector."""
         text_stripped = text.strip()
+        text_lower = text.lower()
         
-        # 1. INITIAL CANDIDATE DETECTION (Rule-based)
-        candidate_role = "explanation"
-        
-        # ============ QUESTION (interrogative form) ============
+        # 1. Structural/Format roles (highest priority)
         if form == "interrogative":
-            candidate_role = "question"
+            return "question"
+
+        # 2. Rule-based roles from TagDetector (the core logic)
+        detected_tags = self.tag_detector.detect_tags(text)
         
-        # ============ IRRELEVANT (with exceptions) ============
-        if candidate_role == "explanation" and len(text_stripped) < 15:
-            has_exception = any(p.search(text) for p in self._short_exceptions)
-            if not has_exception:
-                candidate_role = "irrelevant"
-        
-        # Boilerplate / Navigation / URLs (High priority for irrelevant)
-        if candidate_role == "explanation" or candidate_role == "topic":
-            if re.search(r"^\s*(see\s+(?:also|below|above)|page\s+\d+|continued|ibid)\s*$", text_lower):
-                candidate_role = "irrelevant"
-            elif re.search(r"\b(?:http|www|mhhe|com\b)", text_lower):
-                candidate_role = "irrelevant"
-            elif re.search(r"\b(?:all\s+rights\s+reserved|copyright)\b", text_lower):
-                candidate_role = "irrelevant"
+        # PRIORITY CHECK: If it's a reference, return immediately regardless of length/noise
+        if "reference" in detected_tags:
+            return "reference"
             
-        # ============ REFERENCE (Check before procedure to catch "Note Table 1") ============
-        if candidate_role == "explanation":
-            if re.search(r"\b(figure|table|exhibit|chart|appendix|spreadsheet|column|row)\s+\d", text_lower):
-                candidate_role = "reference"
-            elif re.search(r"(?:as\s+)?(?:shown|illustrated|presented|discussed|referenced)\s+in", text_lower):
-                candidate_role = "reference"
-        
-        # ============ ASSUMPTION (Scenario Setup - Prioritized over evidence/procedure) ============
-        if candidate_role == "explanation" or candidate_role == "reference":
-            if re.search(r"\b(assume|assuming|given\s+that|suppose|provided\s+that|let\s+\w+\s+be)\b", text_lower):
-                candidate_role = "assumption"
-            elif re.search(r"^(?:If|When|Suppose|Assume|Given|Let)\b", text):
-                candidate_role = "assumption"
+        # 3. Noise/Irrelevant detection (moved after reference check)
+        if len(text_stripped) < 15 and not any(p.search(text) for p in self._short_exceptions):
+            return "irrelevant"
+        if any(p.search(text_lower) for p in self._boilerplate):
+            return "irrelevant"
 
-        # ============ CONCLUSION ============
-        if candidate_role == "explanation" or candidate_role == "assumption":
-            if re.search(r"\b(therefore|thus|hence|in\s+conclusion|as\s+a\s+result|consequently|overall|ultimately|in\s+short|the\s+lesson|takeaway|the\s+result\s+is)\b", text_lower):
-                candidate_role = "conclusion"
-            elif is_last and re.search(r"\b(summary|overall|ultimately|finally)\b", text_lower):
-                candidate_role = "conclusion"
+        # 4. Other Priority Roles
+        for role in self.ROLE_PRIORITY:
+            if role == "reference": continue # Already handled
+            if role in detected_tags:
+                # Domain Constraint: mechanism only in main body explanation/example chunks
+                if role == "mechanism":
+                    # 1. Ignore if in front matter
+                    if heading_path and re.search(r"front\s*matter", heading_path, re.I):
+                        continue
+                    # 2. Ignore if contains "Note:" or "McGraw Hill" (automatic exclusion)
+                    if re.search(r"\bNote:|\bMcGraw\s*Hill\b", text):
+                        continue
+                    # 3. Only in的主体块 (explanation, example, or generic paragraph)
+                    # We use chunk_type if available; if not, we rely on context
+                    if chunk_type and chunk_type not in ["explanation", "example", "paragraph"]:
+                        continue
+                        
+                # Specific logic for procedure: needs verb or specific sequence word
+                if role == "procedure" and not is_imperative and not re.match(r"^(?:first|second|next|then|finally)\b", text_lower):
+                    continue
+                return role
 
-        # ============ COMPARISON ============
-        if candidate_role == "explanation":
-            if re.search(r"\b(compar|contrast|unlike|whereas|similar|differ|versus|vs\.)\b", text_lower):
-                candidate_role = "comparison"
-            elif re.search(r"^(?:Unlike|Whereas|Similarly|In\s+contrast)\b", text):
-                candidate_role = "comparison"
-            elif re.search(r"\b(more|less|greater|smaller|higher|lower)\s+than\b", text_lower):
-                candidate_role = "comparison"
+        # 4. Heading Context Boost
+        if heading_hint and heading_hint != "explanation":
+            return heading_hint
 
-        # ============ EVIDENCE (Data-driven) ============
-        if candidate_role == "explanation":
-             if any(p.search(text) for p in self._evidence_patterns):
-                candidate_role = "evidence"
-
-        # ============ PROCEDURE (Imperative/Steps) ============
-        if candidate_role == "explanation":
-            if is_imperative or re.search(r"^(first|second|third|finally|next|then),?\s", text_lower):
-                candidate_role = "procedure"
-            elif re.search(r"\b(step\s+\d+|algorithm|methodology)\b", text_lower):
-                candidate_role = "procedure"
-
-        # ============ DEFINITION ============
-        if candidate_role == "explanation":
-            if re.search(r"\bis\s+(defined\s+as|a\s+\w+\s+that)\b", text_lower):
-                candidate_role = "definition"
-            elif re.search(r"\brefers?\s+to\b|\bmeans?\s+that\b", text_lower):
-                candidate_role = "definition"
-            # Glossary style: "Term [Space] A description starting with capital/article"
-            elif re.search(r"^[a-zA-Z][\w\s-]{1,30}\s+(?:A|An|The|Is|Process|Measure|Ratio|Method)\b", text):
-                candidate_role = "definition"
-
-        # ============ FORMULA ============
-        if candidate_role == "explanation" or candidate_role == "evidence":
-            # Strengthened regex: must have operators with spaces or math-like density
-            # Avoiding hyphens in words like 'day-to-day' by requiring one of [=+\*/^] or spacing
-            if re.search(r"[=+\*/^].*[=+\-*/^]|[\d\s][+\-*/][\d\s].*[\d\s][+\-*/][\d\s]|[A-Z]\s*=\s*[A-Z\d]", text):
-                candidate_role = "formula"
-            elif re.search(r"\bequation\b|\bformula\b|\bwhere\s+\w+\s*=", text_lower):
-                candidate_role = "formula"
-
-
-        # ============ INTERPRETATION ============
-        if candidate_role == "explanation":
-            if re.search(r"\b(this\s+(?:means|implies|suggests)|interpret|in\s+other\s+words|effectively)\b", text_lower):
-                candidate_role = "interpretation"
-
-        # ============ MECHANISM ============
-        if candidate_role == "explanation":
-            if re.search(r"\b(mechanism|process|works?\s+by|functions?\s+by|how\s+\w+\s+works?)\b", text_lower):
-                candidate_role = "mechanism"
-
-        # ============ LIMITATION ============
-        if candidate_role == "explanation":
-            if re.search(r"\b(limitation|constraint|caveat|does\s+not\s+(?:apply|work)|only\s+works?\s+(?:when|if))\b", text_lower):
-                candidate_role = "limitation"
-        
-        # ============ APPLICATION ============
-        if candidate_role == "explanation":
-            if re.search(r"\b(in\s+practice|applies?\s+to|used\s+(?:in|for)|practical|real-world)\b", text_lower):
-                candidate_role = "application"
-        
-        # ============ EXAMPLE ============
-        if candidate_role == "explanation":
-            if re.search(r"\b(for\s+example|for\s+instance|such\s+as|consider\s+the|e\.g\.)\b", text_lower):
-                candidate_role = "example"
-        
-        # ============ TOPIC (First sentence boost - Refined) ============
-        if candidate_role == "explanation" and is_first and "VERB" in pos_tags:
-            # Topics should be relatively compact and not start with complex conjunctions
-            word_count = len(text_stripped.split())
-            if word_count < 15 and not re.search(r"^(?:Because|Since|Although|While|If|Whereas)\b", text):
-                 candidate_role = "topic"
-        
-        # 2. CONTEXTUAL REFINEMENT
-        # Logic: If current candidate is vague (explanation) but follow a strong trigger role
-        if candidate_role == "explanation" and prev_role in self.EXPECTED_SEQUENCES:
-            if prev_role == "example" and is_imperative:
-                candidate_role = "procedure" 
+        # 5. Specific Logic for Topic (First sentence of a block)
+        if is_first and len(text_stripped.split()) < 15 and "VERB" in pos_tags:
+            # Topic should not start with complex conjunctions
+            if not re.search(r"^(?:Because|Since|Although|While|If|Whereas)\b", text):
+                return "topic"
             
-        # 3. NEGATIVE CONTEXT FILTERING (Always apply to all roles)
-        if candidate_role in self.NEGATIVE_CONTEXT_RULES:
-            for pattern in self.NEGATIVE_CONTEXT_RULES[candidate_role]:
-                if re.search(pattern, text_lower):
-                    candidate_role = "explanation" 
-                    break
-
-        # ============ HEADING CONTEXT FALLBACK ============
-        if candidate_role == "explanation" and heading_hint:
-            candidate_role = heading_hint
-        
-        return candidate_role
+        return "explanation"
     
     def get_last_n_sentences(self, text: str, n: int = 2) -> str:
         """Extract the last N sentences from text for overlap."""
@@ -2444,16 +2534,24 @@ class ContinuationDetector:
         bbox = seg.get('bbox')
         if not bbox or len(bbox) < 4:
             return False
-        # Assume page height ~842 (A4), bottom 15%
-        return bbox[3] > 842 * 0.85
+            
+        # Using Safe Zone threshold from config
+        # PDF Coordinates: Low Y is bottom
+        ph = self.config.PAGE_HEIGHT_DEFAULT
+        bottom_threshold = ph * self.config.FURNITURE_BOTTOM_BAND
+        return bbox[3] < bottom_threshold
     
     def _estimate_at_top(self, seg: Dict[str, Any]) -> bool:
         """Estimate if segment is at page top based on bbox."""
         bbox = seg.get('bbox')
         if not bbox or len(bbox) < 4:
             return False
-        # Assume page height ~842 (A4), top 15%
-        return bbox[1] < 842 * 0.15
+            
+        # Using Safe Zone threshold from config
+        # PDF Coordinates: High Y is top
+        ph = self.config.PAGE_HEIGHT_DEFAULT
+        top_threshold = ph * (1 - self.config.FURNITURE_TOP_BAND)
+        return bbox[1] > top_threshold
     
     def get_last_evidence(self) -> Dict[str, Any]:
         """Return the evidence from the last detection call."""
@@ -2595,15 +2693,31 @@ class LogicSegmenter:
         
         logger.info(f"Loaded {len(flat_segments)} segments")
         
+        # Pre-execution Gating: Detect Main Body start/end
+        gating_info = None
+        if self.config.ENABLE_CONTENT_GATING:
+            # We need toc_pages for better gating, detect them first
+            toc_pages = self._detect_toc_pages(flat_segments)
+            gatekeeper = ContentGatekeeper(self.config)
+            gating_info = gatekeeper.analyze(flat_segments, detected_toc_pages=toc_pages)
+            if gating_info.get('start_id'):
+                logger.info("Main Body Gating: Active for this document")
+
         # Apply Three-Phase Correction Pipeline
         # This must run BEFORE continuation detection to ensure correct reading order
         if (self.config.ENABLE_READING_ORDER_CORRECTION or 
             self.config.ENABLE_HEADING_RECONSTRUCTION or 
             self.config.ENABLE_BACKFILL_CORRECTION):
-            flat_segments = self.reading_order_corrector.process(flat_segments)
+            flat_segments = self.reading_order_corrector.process(flat_segments, gating_info)
             corrector_stats = self.reading_order_corrector.get_stats()
         else:
             corrector_stats = {}
+        
+        # Optional: Strip Front Matter segments completely if configured
+        if self.config.ENABLE_CONTENT_GATING and self.config.STRIP_FRONT_MATTER:
+            original_len = len(flat_segments)
+            flat_segments = [s for s in flat_segments if s.get('doc_zone') != 'front']
+            logger.info(f"Gating: Stripped {original_len - len(flat_segments)} front-matter segments")
         
         # Annotate segments with continuation markers
         if self.config.ENABLE_CONTINUATION_DETECTION:
@@ -2611,13 +2725,18 @@ class LogicSegmenter:
             continuation_count = sum(1 for s in flat_segments if s.get('is_continuation') != 'none')
             logger.info(f"Detected {continuation_count} cross-page continuations")
         
+        # Detect TOC pages
+        toc_pages = self._detect_toc_pages(flat_segments)
+        if toc_pages:
+            logger.info(f"Detected TOC on pages: {sorted(list(toc_pages))}")
+        
         # Build block catalog for reference detection
         self.block_catalog = self.reference_detector.build_block_catalog(flat_segments)
         logger.info(f"Built block catalog: {len(self.block_catalog['by_segment_id'])} blocks, "
                    f"{len(self.block_catalog['by_caption'])} with captions")
         
         # Process segments into chunks
-        chunks = self._process_segments(flat_segments)
+        chunks = self._process_segments(flat_segments, toc_pages=toc_pages)
         
         # Post-process: merge short chunks and apply overlap
         chunks = self._post_process_chunks(chunks)
@@ -2660,7 +2779,35 @@ class LogicSegmenter:
         
         return result
     
-    def _process_segments(self, segments: List[Dict]) -> List[EnrichedChunk]:
+    def _detect_toc_pages(self, segments: List[Dict]) -> set:
+        """Detect pages that are likely Table of Contents."""
+        from collections import defaultdict
+        toc_pages = set()
+        page_texts = defaultdict(list)
+        for seg in segments:
+            p = seg.get('page', 0)
+            page_texts[p].append(seg.get('text', '').lower())
+        
+        toc_keywords = {
+            'contents', 'table of contents', 'index', '目录', 
+            'brief contents', 'detailed contents', 'summary table of contents'
+        }
+        for p, texts in page_texts.items():
+            full_text = " ".join(texts)
+            # 1. Keyword check (prioritize early pages)
+            if any(kw in full_text for kw in toc_keywords) and p < 60:
+                toc_pages.add(p)
+                continue
+            # 2. Structure check: dotted leaders + numbers at end of lines
+            # Restricted to very early document to avoid misdetecting List of Tables/Figures
+            if p < 45: 
+                # Require more dots (5) and ensure it looks like a TOC line
+                dotted_lines = sum(1 for t in texts if re.search(r'[\.·-]{5,}\s*\d+$', t))
+                if dotted_lines >= 3:
+                    toc_pages.add(p)
+        return toc_pages
+
+    def _process_segments(self, segments: List[Dict], toc_pages: set = None) -> List[EnrichedChunk]:
         """
         Core processing logic:
         1. Handle cross-page continuations with evidence tracking
@@ -2674,12 +2821,63 @@ class LogicSegmenter:
         continuation_type = "none"  # Track continuation confidence
         merge_evidences = []  # Collect all evidence for this buffer
         
+        toc_pages = toc_pages or set()
+        
         for i, seg in enumerate(segments):
             seg_text = seg.get('text', '')
             seg_type = seg.get('type', 'Paragraph')
             heading_path = seg.get('heading_path', '')
             is_continuation = seg.get('is_continuation', 'none')
             continuation_evidence = seg.get('continuation_evidence', {})
+            seg_col = seg.get('column_index', -1)
+            
+            # TOC Special Handling
+            if seg.get('page', 0) in toc_pages:
+                # If matching TOC line pattern (chapter/section ... page)
+                # Force it to be a Header/Topic to prevent adsorption and preserve hierarchy
+                if re.search(r'[\.·-]{3,}\s*\d+$', seg_text) or re.search(r'^\d+(\.\d+)*\s+[A-Z]', seg_text):
+                    seg_type = 'Header'
+                    seg['type'] = 'Header'
+                    seg['inferred_role'] = 'topic'
+                    logger.debug(f"TOC Rule: Promoting {seg.get('segment_id')} to Header")
+            
+            # NEW: Merge Guards
+            # 1. Column Locking: Prevent merging across columns unless spanning
+            # 2. ID Gap Detection: Prevent merging segments with large ID distance
+            should_flush_by_guard = False
+            if buffer:
+                prev_seg = buffer[-1]
+                prev_col = prev_seg.get('column_index', -1)
+                
+                # Column Guard: If both are non-spanning and different, block merge
+                if (self.config.COLUMN_MERGE_GUARD and 
+                    seg_col != -1 and prev_col != -1 and seg_col != prev_col):
+                    should_flush_by_guard = True
+                    logger.debug(f"Merge Guard: Column mismatch ({prev_col} != {seg_col}). Flushing.")
+                
+                # ID Gap Guard: Check segment ID sequence
+                prev_id_str = prev_seg.get('segment_id', 'seg_0')
+                curr_id_str = seg.get('segment_id', 'seg_0')
+                try:
+                    prev_id_num = int(re.search(r'\d+', prev_id_str).group())
+                    curr_id_num = int(re.search(r'\d+', curr_id_str).group())
+                    if abs(curr_id_num - prev_id_num) > self.config.SEGMENT_ID_GAP_THRESHOLD:
+                        should_flush_by_guard = True
+                        logger.debug(f"Merge Guard: ID gap too large ({prev_id_num} -> {curr_id_num}). Flushing.")
+                except:
+                    pass
+
+            if should_flush_by_guard and buffer:
+                chunk = self._create_chunk(buffer, current_heading_path)
+                chunk.is_cross_page = has_cross_page
+                chunk.continuation_type = continuation_type
+                chunk.needs_review = (continuation_type == 'partial')
+                chunk.merge_evidence = self._compile_merge_evidence(merge_evidences)
+                chunks.append(chunk)
+                buffer = []
+                has_cross_page = False
+                continuation_type = "none"
+                merge_evidences = []
             
             # Phase 1: Semantic Role Pre-analysis (Role-First)
             discourse_role = self.pos_analyzer.pre_analyze_role(seg_text) if self.pos_analyzer else None
@@ -3413,10 +3611,31 @@ class LogicSegmenter:
             if "procedure" not in tags:
                 tags.append("procedure")
         
-        # Analyze sentences with POS (enhanced with heading context)
+        # Determine chunk type early to influence sentence roles
+        if chunk_type is None:
+            chunk_type = self._infer_chunk_type(segments, tags, [])
+            
+        # Forced Role Linkage logic
+        forced_role = None
+        if chunk_type == "header":
+            forced_role = "topic"
+        elif all(s.get('is_furniture', False) or s.get('is_noise_header', False) for s in segments):
+            forced_role = "irrelevant"
+            
+        # Analyze sentences with POS
         sentences = []
         if self.pos_analyzer and full_text:
-            sentences = self.pos_analyzer.analyze_sentences(full_text, heading_path)
+            sentences = self.pos_analyzer.analyze_sentences(
+                full_text, heading_path, forced_role=forced_role, chunk_type=chunk_type
+            )
+            
+            # AGGREGATE TAGS: Ensure chunk tags include all tags found in any sentence
+            # This is crucial for 'reference' detection in complex sentences
+            sentence_tag_set = set(tags)
+            for sent in sentences:
+                if "tags" in sent:
+                    sentence_tag_set.update(sent["tags"])
+            tags = list(sentence_tag_set)
         
         # Determine chunk type if not provided
         if chunk_type is None:
@@ -3430,6 +3649,10 @@ class LogicSegmenter:
                 full_text, chunk_page, self.block_catalog
             )
         
+        # Determine dominant zone for the chunk
+        zones = [s.get('doc_zone', 'body') for s in segments]
+        dominant_zone = max(set(zones), key=zones.count) if zones else "body"
+        
         return EnrichedChunk(
             chunk_id=chunk_id,
             heading_path=heading_path,
@@ -3442,7 +3665,8 @@ class LogicSegmenter:
             page_range=page_range,
             depth=depth,
             word_count=word_count,
-            references=references  # NEW
+            references=references,
+            doc_zone=dominant_zone
         )
     
     def _infer_chunk_type(self, segments: List[Dict], tags: List[str], 

@@ -38,3 +38,4 @@ ENV/
 *.log
 audit_sample*.json
 inputs/*.pdf
+Sbert_chunker/
