@@ -39,3 +39,6 @@ ENV/
 audit_sample*.json
 inputs/*.pdf
 Sbert_chunker/
+outputs/
+TOC_Sandbox/
+.agent/
