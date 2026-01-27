@@ -1,11 +1,3 @@
-# Technical Protocol: Semantic Structure Parsing & Chunking
-
-**Version:** 2.1  
-**Date:** 2026-01-27  
-**Scope:** `semantic_chunker` Architecture & Logic  
-
----
-
 ## 1. Overview
 
 This document outlines the technical architecture and methodological protocols implemented in the **Synapta Parser & Chunker**. The system is designed to transform unstructured PDF documents into highly structured, semantically enriched chunks optimized for Retrieval-Augmented Generation (RAG). Unlike standard flat chunking (sliding window), this pipeline enforces strict document structure and semantic coherence.
