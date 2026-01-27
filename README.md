@@ -74,20 +74,6 @@ The `ContinuationDetector` prevents artificial splits at page ends by checking:
 *   **Relationship Types**: Generates `next` (context), `child_of` (taxonomy), and `references` (cross-object) edges.
 *   **MetricsCollector**: Provides granular stats on chunk density and role distribution.
 
-## 🛠️ Usage
-
-### Installation
-```bash
-pip install -r requirements.txt
-python -m spacy download en_core_web_md
-```
-
-### Running the Pipeline
-```bash
-# Processes documents from parser output to semantic chunks
-python -m Semantic_chunker.main
-```
-
 ## 📊 Output Schema
 The resulting JSON follows a strict schema for downstream compatibility:
 *   **`metadata`**: Authoritative book data (Title, Authors, ISBN, Publisher) + Processing Stats.
