@@ -9,10 +9,10 @@ The project follows a decoupled, component-based architecture:
 1.  **`Semantic_chunker/`**: The core rule-based segmentation engine.
     *   `main.py`: Entry point for batch processing.
     *   `segmenter.py`: Orchestrates the pipeline (`LogicSegmenter`) by coordinating specialized analyzers.
-    *   `toc_parser.py`: **Authority Structural Seeding**. Detects and parses Table of Contents to enforce document hierarchy.
     *   `config.py`: Centralized configuration (`ChunkingConfig`).
     *   `schema.py`: Shared data models (`EnrichedChunk`, `Edge`, `Reference`).
     *   **`analyzers/`**:
+        *   **`structure.py`**: **Advanced TOC Funnel**. Implements the 3-stage analysis (Metadata, Heuristics, Vision) and document boundary mapping.
         *   `chunk_factory.py`: Atomic chunk assembly, text repair, and semantic type inference.
         *   `kg_linker.py`: Knowledge Graph topology generator (Next, PartOf, Reference edges).
         *   `pos_analyzer.py`: Functional role analysis using spaCy and POS tagging.
@@ -31,20 +31,27 @@ The project follows a decoupled, component-based architecture:
 
 The standard pipeline follows a "Pre-Enhance -> Stream-Chunk -> Topologize" flow:
 
-### 1. Structural Seeding (TOC-First)
-The process begins with the `TOCParser`. It identifies TOC pages, extracts the hierarchical index, and "seeds" every segment in the document with its authoritative section path. This ensures that even if a header is misidentified during layout analysis, the chunk retains its correct structural context.
+### 1. Advanced TOC Analysis (The 3-Stage Funnel)
+The pipeline uses a "Funnel" strategy (implemented in `BookStructureAnalyzer`) to establish the document's structural "North Star":
+*   **Stage 1: Metadata Outlines**: Direct extraction of PDF bookmarks for 100% accuracy.
+*   **Stage 2: Heuristic Fingerprinting**: Robust regex scanning for TOC patterns (`Title ... Page`) when metadata is missing.
+*   **Stage 3: Vision Fallback (Artifact Capture)**: Automatic detection and high-res capture of candidate TOC pages for Vision-LLM or manual review.
 
-### 2. Strict Metadata & Gating
-*   **Authority API Lookup**: The `MetadataManager` scans for an ISBN. If found, it fetches verified book metadata via Google Books API. **No ISBN means no metadata**, ensuring 100% accuracy.
-*   **Content Gating**: The `Gatekeeper` identifies the transition from front matter to the actual main body to optimize RAG relevance.
+**Outcome**: Every chunk is calibrated against this authoritative skeleton, ensuring precise `heading_path` generation even when layout analysis fails.
+
+### 2. Structural Boundary Mapping
+The system automatically classifies the document into functional zones:
+*   **Front Matter**: Identified via TOC indicators (Preface, Brief Contents).
+*   **Body**: Precise chapter-level boundaries and page ranges.
+*   **Back Matter & Glossary**: Heuristic detection of end-of-book sections, with specialized tagging for glossary definitions.
 
 ### 3. Functional Role Identification (SRI)
 The `POSAnalyzer` assigns roles to sentences using spaCy. This guides the `ChunkFactory` in determining if a chunk represents a `definition`, `theorem`, `procedure`, or `explanation`.
 
-**Domain-Specific Optimization (Financial/Technical):**
-*   `Mechanism`: Logic-heavy sentences (e.g., *arbitrage*, *volatility*).
+**Domain-Specific Roles:**
+*   `Mechanism`: Logic-heavy sentences (e.g., *transmission*, *arbitrage*).
+*   `Contrast`: Intra-sentence opposing logic (*however*, *despite*).
 *   `Assumption`: Hypothetical scenarios (*Assume*, *Suppose*).
-*   `Assumption`, `Limitation`, `Conclusion`, etc.
 
 ### 4. Reading Order & Spatial Bonding
 *   **Column Correction**: Handles complex multi-column flows using spatial relative positioning.
