@@ -1,69 +1,77 @@
 # Synapta Parser & Chunker
 
-This project implements a high-precision PDF parsing, structural reconstruction, and semantic segmentation pipeline. It transforms raw PDF documents into a strict, page-aware hierarchy (**Topic → Section → Subsection → Objects**) where every chunk is traceable and linkable for RAG and Knowledge Graph (KG) workflows.
-
-## 🏗️ Project Structure
-
-The project follows a decoupled, component-based architecture:
-
-```text
-Parser_Chunking/
-├── run_pipeline.py          # Unified entry point for Parsing + Chunking
-├── semantic_chunker/        # Core Rule-Based Segmentation Engine
-│   ├── parser.py            # Enhanced Parser (Docling + Hierarchy & Metadata)
-│   ├── segmenter.py         # Orchestrator (LogicSegmenter)
-│   ├── config.py            # Central Configuration (ChunkingConfig)
-│   ├── analyzers/           # Specialized Analysis Modules
-│   │   ├── structure.py     # Authoritative Structure Analysis (TOC Funnel)
-│   │   ├── pos_analyzer.py  # Function & Role Analysis (NLP/SPAcy)
-│   │   └── ...
-│   └── ...
-├── sbert_chunker/           # Experimental SBERT-based Segmenter
-└── inputs/ & outputs/       # I/O Directories
-```
-
-## Quick Start
-Run the full pipeline (Parsing -> Chunking) with a single command:
-```bash
-python run_pipeline.py
-```
-This will process all PDFs in `inputs/` and generate enriched JSON in `outputs/Chunks_Semantic/`.
+A robust, structure-aware PDF parsing and semantic chunking pipeline designed for high-quality RAG (Retrieval-Augmented Generation) applications.
 
 ## 🚀 Key Features
 
-### 1. Authoritative Header Enforcement (Pre-Chunking)
-We solve the "Toxic Header" problem by enforcing a strict **Authoritative TOC Filter**:
-*   **Source of Truth**: The `BookStructureAnalyzer` extracts a "Gold Standard" TOC from metadata or heuristic scanning.
-*   **Enforcement**: Before chunking, every `Header` detected by the OCR/Parser is cross-referenced against this TOC list.
-*   **Purification**: Unauthorized headers (e.g., long sentences misclassified as headers) are aggressively **downgraded to Paragraphs**. This ensures clean, concise `heading_path` breadcrumbs.
+### 1. Structure-Aware Parsing (Enhanced Parser)
+- **Docling Integration**: Leverages Docling for accurate layout analysis.
+- **Hierarchical Tree**: Builds a strict `Root > Chapter > Section` tree to preserve document structure.
+- **Authoritative TOC**: Extracts the Table of Contents (TOC) to serve as the ground truth for document hierarchy.
 
-### 2. Enhanced Semantic Role Identification (POS++)
-The `POSAnalyzer` uses a composite strategy to assign granular roles to every sentence:
-*   **Keyword Overrides**: Explicit markers force specific roles to boost RAG performance:
-    *   `"For example..."` → **Example**
-    *   `"In summary..."` → **Conclusion**
-*   **NER Salvation**: Prevents critical named entities (e.g., "Carl Icahn") from being discarded as "noise" even if the sentence is short.
-*   **Fragment Merging**: Automatically heals broken sentence fragments (OCR artifacts) by merging them into the preceding context.
+### 2. Semantic Chunking (Logic Segmenter)
+This project uses a sophisticated "Logic Segmenter" that goes beyond simple sliding windows:
 
-### 3. Advanced TOC Analysis (The 3-STAGE Funnel)
-The pipeline uses a "Funnel" strategy to establish the document's structural "North Star":
-*   **Stage 1: Metadata Outlines**: Direct extraction of PDF bookmarks for 100% accuracy.
-*   **Stage 2: Heuristic Fingerprinting**: Robust regex scanning for TOC patterns (`Title ... Page`) when metadata is missing.
-*   **Stage 3: Vision Fallback**: Automatic capture of TOC pages for potential downstream Vision correction.
+#### 🧠 Intelligent Role Detection
+- **POS & Rule-Based Analysis**: Identifies sentence roles (`explanation`, `definition`, `procedure`, `hypothesis`, etc.).
+- **Keyword Overrides**:
+  - `For example...` -> Forces `example` role (improves RAG retrieval for "give me examples of...").
+  - `In summary...` / `Therefore...` -> Forces `conclusion` role.
+- **NER "Salvation"**: Prevents discarding short sentences if they contain important Named Entities (e.g., "Carl Icahn").
 
-### 4. Cross-Page Continuity
-The `ContinuationDetector` prevents artificial splits at page ends by checking:
-*   **Syntactic Openings**: Sentences ending in conjunctions or prepositions.
-*   **Spatial Proximity**: Distance between the last block of one page and the first of the next.
-*   **Dehyphenation**: Linguistic repair for words split across pages.
+#### 🛡️ Heading Path Sanitization (Pre-chunking)
+- **TOC Enforcement**: Before chunking, every identified "Header" is validated against the authoritative TOC.
+- **Toxic Header Removal**: Headers not found in the TOC are downgraded to Paragraphs, preventing "dirty" heading paths (e.g., extremely long sentences mistakenly identified as headers) from polluting chunks.
 
-## 📊 Output Schema
-The resulting JSON follows a strict schema for downstream compatibility:
-*   **`metadata`**: Authoritative book data (Title, Authors, ISBN, Publisher) + Processing Stats.
-*   **`chunks`**: Enriched objects containing:
-    *   `segment_id`: Stable unique identifier.
-    *   `chunk_type`: Taxonomy type (`header`, `list`, `definition`, `formula`, etc.).
-    *   `heading_path`: Full breadcrumb (e.g., `Part I > Chapter 1 > 1.1`).
-    *   `text`: Cleaned content.
-    *   `tags`: Semantic labels (e.g., `evidence`, `procedure`).
-    *   `edges`: Typed KG links to other chunks or references.
+#### 🧩 Advanced Merging & Repair
+- **Fragment Merging**: Automatically detects and merges distinct sentence fragments (< 5 words) caused by PDF line breaks or OCR errors.
+- **Cross-Page Continuation**: intelligenty detects paragraphs spanning across pages and merges them.
+- **Caption Bonding**: "Table 1.1" captions are physically bonded to their corresponding Table/Image blocks, preventing them from becoming orphan chunks.
+
+## 📂 Project Structure
+
+```text
+Parser_Chunking/
+├── run_pipeline.py          # ⚡️ Main Entry Point
+├── inputs/                  # Place PDF files here
+├── outputs/                 # Results
+│   ├── Docling_json/        # Intermediate parsed JSON
+│   └── Chunks_Semantic/     # Final semantic chunks (Ready for RAG)
+├── semantic_chunker/        # Core Logic Package
+│   ├── parser.py            # Enhanced Parser module
+│   ├── segmenter.py         # Main chunking logic
+│   ├── config.py            # Configuration settings
+│   └── analyzers/           # NLP analyzers (POS, Structure, etc.)
+└── sbert_chunker/           # (Optional) SBERT-based alternative
+```
+
+## 🛠️ Usage
+
+1.  **Install Dependencies**:
+    ```bash
+    pip install -r requirements.txt
+    python -m spacy download en_core_web_md
+    ```
+
+2.  **Add PDFs**:
+    Place your PDF files in the `inputs/` directory.
+
+3.  **Run Pipeline**:
+    ```bash
+    python run_pipeline.py
+    ```
+
+4.  **Check Results**:
+    Parsed chunks will be in `outputs/Chunks_Semantic/*.json`.
+
+## ⚙️ Configuration
+
+You can tweak chunking behavior in `semantic_chunker/config.py`:
+
+```python
+class ChunkingConfig:
+    # ...
+    ENABLE_STRICT_HEADER_ENFORCEMENT = True  # Toggle TOC-based header filtering
+    ENABLE_CONTINUATION_DETECTION = True      # Toggle cross-page logic
+    # ...
+```
