@@ -1,6 +1,6 @@
 # Synapta Parser & Chunker
 
-This project implements a high-precision PDF parsing, structural reconstruction, and semantic segmentation pipeline. It transforms raw PDF documents into context-enriched, semantically tagged chunks suitable for Retrieval-Augmented Generation (RAG) and LLM-based applications.
+This project implements a high-precision PDF parsing, structural reconstruction, and semantic segmentation pipeline. It transforms raw PDF documents into a strict, page-aware hierarchy (**Topic → Section → Subsection → Objects**) where every chunk is traceable and linkable for RAG and Knowledge Graph (KG) workflows.
 
 ## 🏗️ Project Structure
 
@@ -45,13 +45,18 @@ The system automatically classifies the document into functional zones:
 *   **Body**: Precise chapter-level boundaries and page ranges.
 *   **Back Matter & Glossary**: Heuristic detection of end-of-book sections, with specialized tagging for glossary definitions.
 
-### 3. Functional Role Identification (SRI)
-The `POSAnalyzer` assigns roles to sentences using spaCy. This guides the `ChunkFactory` in determining if a chunk represents a `definition`, `theorem`, `procedure`, or `explanation`.
+### 3. Functional Role Identification (SRI) & Object Detection
+The `POSAnalyzer` and `TagDetector` collaborate to identify specialized "Text Objects" beyond standard paragraphs:
+*   **Learning Objectives**: Header + bullet list patterns.
+*   **Concepts & Definitions**: Key terms (bold/italic) + colon/dash definition patterns.
+*   **Theorems & Rules**: Callouts like "Theorem", "Lemma", "Principle", or "Key Takeaways".
+*   **Lists & Procedures**: Systematic detection of bullets and "Step 1/2/3" sequences.
 
-**Domain-Specific Roles:**
+**Domain-Specific Semantic Roles:**
 *   `Mechanism`: Logic-heavy sentences (e.g., *transmission*, *arbitrage*).
 *   `Contrast`: Intra-sentence opposing logic (*however*, *despite*).
 *   `Assumption`: Hypothetical scenarios (*Assume*, *Suppose*).
+*   `Evidence`: Data-driven statements (percentages, financial figures).
 
 ### 4. Reading Order & Spatial Bonding
 *   **Column Correction**: Handles complex multi-column flows using spatial relative positioning.
@@ -63,9 +68,11 @@ The `ContinuationDetector` prevents artificial splits at page ends by checking:
 *   **Spatial Proximity**: Distance between the last block of one page and the first of the next.
 *   **Dehyphenation**: Linguistic repair for words split across pages.
 
-### 6. KG Topology & Metrics
-*   **KGLinker**: Converts the linear list of chunks into a relative graph. Chunks are linked to their parents (headers) and targets (resolved references).
-*   **MetricsCollector**: Provides granular stats on chunk density, role distribution, and cross-page merge confidence.
+### 6. KG Topology & Reference Linking
+*   **KGLinker**: Converts linear chunks into a graph using stable IDs (`chunk_xxxx`).
+*   **Cross-Reference Detection**: Automatically captures patterns like *"see Figure 2.3"*, *"Table 5.1"*, or *"Eq. (7.4)"* as lightweight `Reference` markers.
+*   **Relationship Types**: Generates `next` (context), `child_of` (taxonomy), and `references` (cross-object) edges.
+*   **MetricsCollector**: Provides granular stats on chunk density and role distribution.
 
 ## 🛠️ Usage
 
@@ -82,6 +89,14 @@ python -m Semantic_chunker.main
 ```
 
 ## 📊 Output Schema
-The resulting JSON includes:
-*   `metadata`: Authoratitive book data + processing metrics.
-*   `chunks`: Enriched objects containing `content`, `heading_path`, `tags`, `bbox`, and `edges` (KG links).
+The resulting JSON follows a strict schema for downstream compatibility:
+*   **`metadata`**: Authoritative book data (Title, Authors, ISBN, Publisher) + Processing Stats.
+*   **`chunks`**: Enriched objects containing:
+    *   `segment_id`: Stable unique identifier.
+    *   `chunk_type`: Taxonomy type (`header`, `list`, `definition`, `table`, etc.).
+    *   `heading_path`: Full breadcrumb (e.g., `Part I > Chapter 1 > 1.1`).
+    *   `page_range`: [start_page, end_page].
+    *   `bbox`: [x0, y0, x1, y1] spatial coordinates.
+    *   `text`: Cleaned content.
+    *   `tags`: Semantic labels (e.g., `evidence`, `procedure`).
+    *   `edges`: Typed KG links to other chunks or references.
