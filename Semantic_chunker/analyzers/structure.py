@@ -53,6 +53,17 @@ class BookStructureAnalyzer:
                     "data": [{"level": e[0], "title": e[1], "page": int(e[2])} for e in toc]
                 }
         
+        # Stage 2: Heuristic Scanning (Text-based)
+        if force_stage is None or force_stage == 2:
+            logger.info("Structure: Attempting Stage 2 (Heuristic Text Scan)...")
+            heuristic_entries = self._stage_2_heuristic()
+            if len(heuristic_entries) > 5:
+                logger.info(f"Structure: Heuristic TOC hit with {len(heuristic_entries)} entries.")
+                return {
+                    "source": "heuristic_text",
+                    "data": heuristic_entries
+                }
+
         # Stage 3: Vision Fallback / Artifact Capture
         if force_stage is None or force_stage == 3:
             logger.info("Structure: Attempting Stage 3 (Vision Fallback / Artifact Capture)...")

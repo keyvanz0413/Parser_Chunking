@@ -12,7 +12,7 @@ class ChunkingConfig:
     ENABLE_OVERLAP = True         # Toggle overlap feature
     
     # Buffer settings
-    MAX_BUFFER_SEGMENTS = 5       # Max segments before forced flush
+    MAX_BUFFER_SEGMENTS = 15       # Max segments before forced flush
     
     # Short paragraph merge threshold
     SHORT_PARAGRAPH_WORDS = 50    # Paragraphs shorter than this may be merged
@@ -70,3 +70,6 @@ class ChunkingConfig:
     ENABLE_SPATIAL_BONDING_CHECK = True      # Enable bbox proximity verification
     MAX_CAPTION_VERTICAL_DISTANCE = 0.25     # Max 25% of page height between caption and block
     MAX_CAPTION_HORIZONTAL_OVERLAP = 0.3     # Min 30% horizontal overlap required
+    
+    # Header Enforcement
+    ENABLE_STRICT_HEADER_ENFORCEMENT = True  # Pre-chunking: Downgrade non-TOC headers to Paragraphs

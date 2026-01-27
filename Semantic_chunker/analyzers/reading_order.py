@@ -130,13 +130,33 @@ class ReadingOrderCorrector:
             left_col = []
             right_col = []
             spanning = []
+            continuations = [] # NEW: Explicit bucket for cross-page flows
+            
+            # Identify priority segments (continuations and their preceding noise headers)
+            priority_ids = set()
+            for seg in page_segs:
+                if seg.get('is_continuation') in ['full', 'partial']:
+                    priority_ids.add(seg.get('segment_id'))
+                    # Also include any skipped headers identified by the detector
+                    evidence = seg.get('continuation_evidence', {})
+                    skipped = evidence.get('skipped_noise_headers', [])
+                    for sid in skipped:
+                        priority_ids.add(sid)
             
             for seg in page_segs:
+                # Identify if this is a priority segment for the cross-page flow
+                if seg.get('segment_id') in priority_ids:
+                    seg['_is_priority_continuation'] = True
+                    continuations.append(seg)
+                    continue
+
                 bbox = seg.get('bbox')
                 if not bbox or len(bbox) < 4:
                     seg['column_index'] = -1
                     spanning.append(seg)
                     continue
+
+
                 
                 x_left, y_top, x_right, y_bottom = bbox[0], bbox[1], bbox[2], bbox[3]
                 
@@ -155,18 +175,25 @@ class ReadingOrderCorrector:
             left_col.sort(key=lambda s: -s.get('bbox', [0, 0, 0, 0])[1])
             right_col.sort(key=lambda s: -s.get('bbox', [0, 0, 0, 0])[1])
             spanning.sort(key=lambda s: -s.get('bbox', [0, 0, 0, 0])[1])
+            continuations.sort(key=lambda s: -s.get('bbox', [0, 0, 0, 0])[1])
             
             # Determine ordering strategy
             if self.config.ENABLE_COLUMN_ISOLATION:
-                # Absolute Isolation: Spanning -> Left Column -> Right Column
-                reordered = spanning + left_col + right_col
+                # Absolute Isolation: Continuations -> Spanning -> Left Column -> Right Column
+                reordered = continuations + spanning + left_col + right_col
             else:
-                # Interleaved merge by y-position (original behavior)
+                # Interleaved merge by y-position
                 all_segs = []
-                for seg in left_col + right_col + spanning:
+                # Mix in continuations with a high priority sort key
+                for seg in left_col + right_col + spanning + continuations:
                     y_top = seg.get('bbox', [0, 0, 0, 0])[1]
                     col_idx = seg.get('column_index', -1)
-                    sort_key = (-y_top, 0 if col_idx <= 0 else 1)
+                    
+                    # PRIORITY: Any priority continuation segment should come first (including skipped)
+                    is_cont = seg.get('_is_priority_continuation', False)
+                    
+                    # Sort Key: (is_not_continuation, -y_top, col_idx)
+                    sort_key = (0 if is_cont else 1, -y_top, 0 if col_idx <= 0 else 1)
                     all_segs.append((sort_key, seg))
                 all_segs.sort(key=lambda x: x[0])
                 reordered = [seg for _, seg in all_segs]

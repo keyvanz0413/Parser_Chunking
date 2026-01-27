@@ -119,7 +119,7 @@ class POSAnalyzer:
         """
         Analyze text and return sentences with roles.
         
-        Enhanced with heading context and position awareness.
+        Enhanced with heading context, position awareness, and robust fragment handling.
         """
         if self.nlp is None:
             raise RuntimeError("POSAnalyzer.nlp is None. This should not happen if initialization passed.")
@@ -143,6 +143,12 @@ class POSAnalyzer:
             # Check for imperative
             is_imperative = self._is_imperative_sentence(sent)
             
+            # Check for Named Entities (NER Salvation)
+            # We filter for substantive entities (Person, Org, GPE, Event, Work_of_art, etc.)
+            # Skipping CARDINAL, ORDINAL, DATE, etc. for this specific "Salvation" check
+            meaningful_labels = {'PERSON', 'ORG', 'GPE', 'LOC', 'PRODUCT', 'EVENT', 'WORK_OF_ART', 'LAW'}
+            has_named_entities = any(ent.label_ in meaningful_labels for ent in sent.ents)
+            
             # Calculate relative position
             relative_pos = i / max(total_sentences, 1)
             
@@ -161,10 +167,11 @@ class POSAnalyzer:
                 form=form,
                 prev_role=prev_role,
                 chunk_type=chunk_type,
-                heading_path=heading_path
+                heading_path=heading_path,
+                has_named_entities=has_named_entities
             )
             
-            # Forced Role Linkage: Override role if forced or if vague in structural blocks
+            # Forced Role Linkage: Override role if forced
             if forced_role:
                 role = forced_role
             elif heading_hint == "header" and role == "explanation":
@@ -187,13 +194,37 @@ class POSAnalyzer:
             sentences.append({
                 "text": sent_text,
                 "role": role,
-                "secondary_attributes": secondary_attributes, # NEW: Sub-tag chaining
+                "secondary_attributes": secondary_attributes,
                 "tags": sentence_tags,
                 "form": form,
-                "pos_tags": pos_tags[:10],
+                "pos_tags": pos_tags,
                 "is_imperative": is_imperative
             })
         
+        # Fragment Merging: Retroactive Fix for broken sentences
+        # Merge short 'explanation' fragments (< 5 words) into the previous sentence
+        if len(sentences) > 1:
+            merged_sentences = []
+            for s in sentences:
+                if not merged_sentences:
+                    merged_sentences.append(s)
+                    continue
+                
+                prev = merged_sentences[-1]
+                # Condition: Current is short explanation, Prev is not irrelevant
+                word_count = len(s['text'].split())
+                is_short_fragment = (s['role'] == 'explanation' and word_count < 5)
+                
+                if is_short_fragment and prev['role'] != 'irrelevant':
+                    # Merge Logic
+                    prev['text'] += " " + s['text']
+                    # We assume tags propagate or are recalculated if strictly needed, 
+                    # but for simple reconnection reusing prev tags is usually safer/consistent.
+                    continue
+                
+                merged_sentences.append(s)
+            sentences = merged_sentences
+
         return sentences
     
     def pre_analyze_role(self, text: str) -> Optional[str]:
@@ -308,10 +339,19 @@ class POSAnalyzer:
                         is_last: bool = False, form: str = "declarative",
                         prev_role: Optional[str] = None,
                         chunk_type: Optional[str] = None,
-                        heading_path: Optional[str] = None) -> str:
+                        heading_path: Optional[str] = None,
+                        has_named_entities: bool = False) -> str:
         """Determines role using priority-ordered rules and TagDetector."""
         text_stripped = text.strip()
         text_lower = text.lower()
+
+        # 0. Keyword Overrides (Forced Rules)
+        # RAG Optimization: Explicit markers for examples and conclusions
+        if re.match(r'^(?:For example|For instance|e\.g\.|eg\.?)\b', text, re.IGNORECASE):
+            return "example"
+        
+        if re.match(r'^(?:In summary|Therefore|Thus|To summarize|Consequently)\b', text, re.IGNORECASE):
+            return "conclusion"
         
         # 1. Structural/Format roles (highest priority)
         if form == "interrogative":
@@ -325,8 +365,16 @@ class POSAnalyzer:
             return "reference"
             
         # 3. Noise/Irrelevant detection (moved after reference check)
-        if len(text_stripped) < 15 and not any(p.search(text) for p in self._short_exceptions):
+        # Heuristic: Very short text usually noise, UNLESS it's a named entity or math/ref
+        is_short_text = len(text_stripped) < 15
+        
+        # Irrelevant Audit: Don't discard if it has named entities and sufficient word count
+        # E.g. "Carl Icahn" -> 2 words. 
+        has_substantive_content = has_named_entities and len(text_stripped.split()) > 1
+        
+        if is_short_text and not has_substantive_content and not any(p.search(text) for p in self._short_exceptions):
             return "irrelevant"
+        
         if any(p.search(text_lower) for p in self._boilerplate):
             return "irrelevant"
 

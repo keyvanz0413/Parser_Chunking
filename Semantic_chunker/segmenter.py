@@ -75,9 +75,23 @@ class LogicSegmenter:
         if pdf_path.exists():
             pdf_path_str = str(pdf_path)
             self.structure_analyzer = BookStructureAnalyzer(pdf_path_str)
+            # 1. Run Structure Analysis EARLY (Pre-chunking Phase)
+            self.structure = self.structure_analyzer.analyze()
+            logger.info(f"Structure analysis complete for {source_file}")
+            
+            # 2. Enforce Authoritative Headers (Pre-chunking Filter)
+            if self.config.ENABLE_STRICT_HEADER_ENFORCEMENT: # Assuming we want to create/use this flag or just do it
+                flat_segments = self._enforce_authoritative_headers(flat_segments)
         else:
             self.structure_analyzer = None
+            self.structure = None
             logger.warning(f"PDF not found at {pdf_path}. Skipping structure analysis.")
+
+        # 4.4 Cross-Page Continuation Detection (Raw Sequence)
+        # We run this BEFORE reordering so the detector sees the natural page-to-page flow.
+        if self.config.ENABLE_CONTINUATION_DETECTION:
+            flat_segments = self.continuation_detector.annotate_segments(flat_segments)
+            logger.info(f"Continuation: Annotated {len(flat_segments)} segments in raw sequence.")
 
         if (self.config.ENABLE_READING_ORDER_CORRECTION or 
             self.config.ENABLE_HEADING_RECONSTRUCTION or 
@@ -87,12 +101,10 @@ class LogicSegmenter:
         else:
             corrector_stats = {}
 
+
         # 4.5 Structure Analysis & TOC Seeding (AUTHORITATIVE)
         glossary_pages = set()
-        if self.structure_analyzer:
-            self.structure = self.structure_analyzer.analyze()
-            logger.info(f"Structure analysis complete for {source_file}")
-            
+        if self.structure:
             # Apply TOC Seeding via heading_path enrichment
             # Logic: TOC Path is the master context. 
             # To avoid noise and excessive length, we cap the hierarchy:
@@ -125,18 +137,22 @@ class LogicSegmenter:
                             continue
                         clean_curr.append(p)
 
-                    # 2. Decision Logic for Length
-                    if len(gold_parts) >= 3:
-                        # We are already at Section level (Part > Chap > Sect)
-                        # Only append ONE local heading if it exists and looks structural
-                        if clean_curr and seg.get('type') == 'Header':
-                            seg['heading_path'] = f"{gold_path} > {clean_curr[-1]}"
-                        else:
-                            seg['heading_path'] = gold_path
+                    # 2. Decision Logic for Length and Validity
+                    local_header = clean_curr[-1] if clean_curr else None
+                    is_valid_local = False
+                    
+                    if local_header:
+                        # Validation: Header Sanity Check
+                        # - Must be reasonably short (< 60 chars)
+                        # - Must not end with a period (unless it's an abbreviation like "No.")
+                        if len(local_header) < 60:
+                            if not local_header.strip().endswith('.'):
+                                is_valid_local = True
+                    
+                    if is_valid_local:
+                        seg['heading_path'] = f"{gold_path} > {local_header}"
                     else:
-                        # Shallow TOC, can afford 1-2 local headings
-                        local_tail = " > ".join(clean_curr[-1:]) if clean_curr else ""
-                        seg['heading_path'] = f"{gold_path} > {local_tail}" if local_tail else gold_path
+                        seg['heading_path'] = gold_path
                     
                     # Update context text
                     seg['full_context_text'] = f"[Path: {seg['heading_path']}] {seg.get('text', '')}"
@@ -232,6 +248,61 @@ class LogicSegmenter:
 
 
 
+    def _enforce_authoritative_headers(self, segments: List[Dict]) -> List[Dict]:
+        """
+        Downgrades headers that are not found in the authoritative TOC key list.
+        Uses fuzzy matching (normalization) to handle minor OCR/formatting differences.
+        """
+        if not self.structure or not self.structure.get('toc'):
+            logger.warning("Header Enforcement: No authoritative TOC found. Skipping enforcement.")
+            return segments
+        
+        toc_entries = self.structure['toc'].get('data', [])
+        if not toc_entries:
+            return segments
+
+        # Build normalized set of allowed titles
+        allowed_titles = set()
+        allowed_norms = set()
+        
+        for entry in toc_entries:
+            title = str(entry['title'])
+            allowed_titles.add(title.strip().lower())
+            # Normalized: remove non-alphanumeric, lowercase
+            allowed_norms.add(re.sub(r'[^a-z0-9]', '', title.lower()))
+            
+        downgraded_count = 0
+        
+        for seg in segments:
+            if seg.get('type') == 'Header':
+                text = seg.get('text', '').strip()
+                if not text:
+                    continue
+                    
+                # 1. Exact/Lower check
+                if text.lower() in allowed_titles:
+                    continue
+                    
+                # 2. Normalized check
+                text_norm = re.sub(r'[^a-z0-9]', '', text.lower())
+                if text_norm in allowed_norms:
+                    continue
+                
+                # 3. Check for specific exceptions or prefixes (Optional)
+                # For now, strict enforcement as requested.
+                
+                # Downgrade
+                old_type = seg['type']
+                seg['type'] = 'Paragraph'
+                seg['inferred_role'] = 'downgraded_header'
+                seg['original_type'] = old_type
+                downgraded_count += 1
+                logger.debug(f"Header Enforcement: Downgraded non-authoritative header '{text[:30]}...' to Paragraph")
+                
+        logger.info(f"Header Enforcement: Downgraded {downgraded_count} headers not found in TOC list.")
+        return segments
+
+
     def _process_segments(self, segments: List[Dict], toc_pages: set = None, 
                           exclude_pages: set = None, logic_book: LogicBook = None) -> List[EnrichedChunk]:
         """
@@ -296,13 +367,22 @@ class LogicSegmenter:
             should_flush_by_guard = False
             if buffer:
                 prev_seg = buffer[-1]
+                
+                # Check for Semantic Lock: If previous segment sentence is incomplete, 
+                # we MUST NOT flush based on physical layout (columns/IDs).
+                prev_hints = prev_seg.get('style_hints') or self.continuation_detector._detect_text_style(prev_seg)
+                is_semantically_locked = prev_hints.get('ends_incomplete', False)
+                
                 prev_col = prev_seg.get('column_index', -1)
                 
                 # Column Guard: If both are non-spanning and different, block merge
-                if (self.config.COLUMN_MERGE_GUARD and 
+                # CRITICAL: Only apply same-page column guard. Cross-page is handled by ContinuationDetector.
+                # BYPASS: If semantically locked (incomplete sentence), ignore column mismatch.
+                if (not is_semantically_locked and 
+                    self.config.COLUMN_MERGE_GUARD and seg.get('page') == prev_seg.get('page') and
                     seg_col != -1 and prev_col != -1 and seg_col != prev_col):
                     should_flush_by_guard = True
-                    logger.debug(f"Merge Guard: Column mismatch ({prev_col} != {seg_col}). Flushing.")
+                    logger.debug(f"Merge Guard: Column mismatch ({prev_col} != {seg_col}) on same page. Flushing.")
                 
                 # ID Gap Guard: Check segment ID sequence
                 prev_id_str = prev_seg.get('segment_id', 'seg_0')
@@ -310,7 +390,7 @@ class LogicSegmenter:
                 try:
                     prev_id_num = int(re.search(r'\d+', prev_id_str).group())
                     curr_id_num = int(re.search(r'\d+', curr_id_str).group())
-                    if abs(curr_id_num - prev_id_num) > self.config.SEGMENT_ID_GAP_THRESHOLD:
+                    if not is_semantically_locked and abs(curr_id_num - prev_id_num) > self.config.SEGMENT_ID_GAP_THRESHOLD:
                         should_flush_by_guard = True
                         logger.debug(f"Merge Guard: ID gap too large ({prev_id_num} -> {curr_id_num}). Flushing.")
                 except:
@@ -412,6 +492,50 @@ class LogicSegmenter:
                 
                 # Structural header: flush buffer and update global heading path
                 if buffer:
+                    # HEURISTIC: If buffer ends with incomplete sentence, look ahead for continuation
+                    # across this header. This handles "interrupted paragraphs".
+                    should_adsorb_header = False
+                    if i + 1 < len(segments):
+                        next_seg = segments[i+1]
+                        cont_type, _ = self.continuation_detector.detect_continuation(buffer[-1], next_seg)
+                        if cont_type in ['full', 'partial']:
+                            should_adsorb_header = True
+                            logger.info(f"Header Adsorption: Delaying flush for header {seg.get('segment_id')} "
+                                       f"to preserve continuity between {buffer[-1].get('segment_id')} and {next_seg.get('segment_id')}")
+                    
+                    if not should_adsorb_header:
+                        chunk = self.chunk_factory.create_chunk(buffer, current_heading_path)
+                        chunk.is_cross_page = has_cross_page
+                        chunk.continuation_type = continuation_type
+                        chunk.needs_review = (continuation_type == 'partial')
+                        chunk.merge_evidence = self._compile_merge_evidence(merge_evidences)
+                        chunks.append(chunk)
+                        buffer = []
+                        # Reset cross-page state on flush
+                        has_cross_page = False
+                        continuation_type = "none"
+                        merge_evidences = []
+                    else:
+                        # Adsorb the header as noise/floating and continue
+                        buffer.append(seg)
+                        continue
+                
+                # Update structural heading path
+                current_heading_path = heading_path
+                self.structural_heading_path = heading_path
+                
+                # Headers themselves become chunks (if not adsorbed)
+                chunks.append(self.chunk_factory.create_chunk([seg], heading_path, chunk_type="header"))
+                continue
+            
+            # =================================================================
+            # Rule 1.5: Formula Bypass and Aggregation
+            # =================================================================
+            # Strategy: Flush text buffer. Aggregate consecutive formulas.
+            # Placeholder content for now, to be linked with external parser later.
+            if seg_type in ['Formula', 'Equation']:
+                # 1. Flush existing text buffer
+                if buffer:
                     chunk = self.chunk_factory.create_chunk(buffer, current_heading_path)
                     chunk.is_cross_page = has_cross_page
                     chunk.continuation_type = continuation_type
@@ -423,12 +547,27 @@ class LogicSegmenter:
                     continuation_type = "none"
                     merge_evidences = []
                 
-                # Update structural heading path
-                current_heading_path = heading_path
-                self.structural_heading_path = heading_path
+                # 2. Check if we can merge with the previous chunk if it was a Formula
+                # This is a simple way to aggregate without a separate buffer state variable
+                # SAFETY CHECK: Ensure the last chunk has 'chunk_type' attribute
+                if chunks and hasattr(chunks[-1], 'chunk_type') and chunks[-1].chunk_type == 'formula' and chunks[-1].heading_path == heading_path:
+                    # Merge into previous formula chunk
+                    chunks[-1].source_segments.append(seg.get('segment_id'))
+                    # We keep content as placeholder
+                    chunks[-1].content = "[FORMULA PLACEHOLDER]" 
+                    # Update bbox to include new segment (simple union)
+                    # Note: precise bbox union calculation omitted for brevity, assuming downstream relies on segment IDs
+                    logger.debug(f"Formula Aggregation: Merged {seg.get('segment_id')} into previous formula chunk")
+                else:
+                    # Create new Formula chunk
+                    # Create a manual chunk dictionary or use factory with override
+                    # Using factory to ensure standard fields
+                    f_chunk = self.chunk_factory.create_chunk([seg], heading_path, chunk_type="formula")
+                    f_chunk.content = "[FORMULA PLACEHOLDER]"
+                    chunks.append(f_chunk)
+                    logger.info(f"Formula Bypass: Created placeholder chunk for {seg.get('segment_id')}")
                 
-                # Headers themselves become chunks
-                chunks.append(self.chunk_factory.create_chunk([seg], heading_path, chunk_type="header"))
+                # Skip standard logic
                 continue
             
             # =================================================================
@@ -670,18 +809,34 @@ class LogicSegmenter:
             #           If so, delay flush to preserve paragraph integrity
             # =================================================================
             if len(buffer) >= self.config.MAX_BUFFER_SEGMENTS:
-                # Lookahead: check if upcoming segments form a continuation chain
                 should_delay_flush = False
-                for lookahead_idx in range(i + 1, min(i + 4, len(segments))):  # Look ahead up to 3 segments
-                    future_seg = segments[lookahead_idx]
-                    # Skip noise headers in lookahead
-                    if future_seg.get('is_noise_header', False):
-                        continue
-                    # If we find a continuation, delay the flush
-                    if future_seg.get('is_continuation') in ['full', 'partial']:
+                
+                # 1. Sticky Buffer Check (Internal Integrity)
+                # If the current buffer ends with an unfinished sentence, DO NOT flush yet.
+                # We want to keep accumulating until we find a period or hit a hard safety limit (implicit)
+                if buffer:
+                    last_seg = buffer[-1]
+                    # Quick style check if not present (ensure we have style hints)
+                    last_hints = last_seg.get('style_hints') or self.continuation_detector._detect_text_style(last_seg)
+                    
+                    if last_hints.get('ends_incomplete', False):
                         should_delay_flush = True
-                        logger.debug(f"Delaying flush: upcoming {future_seg.get('segment_id')} is a continuation")
-                    break  # Only check the first non-noise segment
+                        logger.debug(f"Sticky Buffer: Refusing flush at {last_seg.get('segment_id')} (incomplete sentence)")
+
+                # 2. Lookahead Check (External Connectivity)
+                # Only run if we haven't already decided to delay
+                if not should_delay_flush:
+                    # Lookahead: check if upcoming segments form a continuation chain
+                    for lookahead_idx in range(i + 1, min(i + 4, len(segments))):  # Look ahead up to 3 segments
+                        future_seg = segments[lookahead_idx]
+                        # Skip noise headers in lookahead
+                        if future_seg.get('is_noise_header', False) or self.continuation_detector._is_noise_header(future_seg):
+                            continue
+                        # If we find a continuation, delay the flush
+                        if future_seg.get('is_continuation') in ['full', 'partial']:
+                            should_delay_flush = True
+                            logger.debug(f"Delaying flush: upcoming {future_seg.get('segment_id')} is a continuation")
+                        break  # Only check the first non-noise segment
                 
                 if not should_delay_flush:
                     chunk = self.chunk_factory.create_chunk(buffer, current_heading_path)

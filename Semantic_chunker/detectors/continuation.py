@@ -47,6 +47,25 @@ class ContinuationDetector:
     FULL_THRESHOLD = 0.7
     PARTIAL_THRESHOLD = 0.4
     
+    # Prepositions and conjunctions that shouldn't end a sentence
+    OPEN_CLAUSE_WORDS = {
+        # Prepositions
+        'of', 'to', 'for', 'with', 'in', 'on', 'at', 'by', 'from', 'into',
+        'through', 'during', 'before', 'after', 'above', 'below', 'between',
+        'under', 'over', 'about', 'against', 'among', 'around', 'without',
+        # Conjunctions
+        'and', 'or', 'but', 'nor', 'so', 'yet', 'both', 'either', 'neither',
+        # Articles (often indicate continuation)
+        'the', 'a', 'an',
+        # Relative pronouns / determiners
+        'that', 'which', 'who', 'whom', 'whose', 'where', 'when', 'while',
+        # Other incomplete indicators
+        'is', 'are', 'was', 'were', 'be', 'been', 'being',
+        'as', 'if', 'whether', 'although', 'because', 'since', 'unless',
+        'such', 'than', 'these', 'those', 'this', 'its',
+        'real', 'financial', 'more', 'most', 'less', 'least', 'other', 'another'
+    }
+
     def __init__(self, config: ChunkingConfig = None):
         self.config = config or ChunkingConfig()
         self._last_evidence = {}  # Store last detection's evidence
@@ -218,8 +237,8 @@ class ContinuationDetector:
         breakdown = {}
         total_score = 0.0
         
-        prev_hints = prev_seg.get('style_hints', {})
-        curr_hints = curr_seg.get('style_hints', {})
+        prev_hints = prev_seg.get('style_hints') or self._detect_text_style(prev_seg)
+        curr_hints = curr_seg.get('style_hints') or self._detect_text_style(curr_seg)
         
         # =====================================================================
         # Factor 1: Position validity (weight: 0.15)
@@ -318,9 +337,9 @@ class ContinuationDetector:
                                       "detail": f"{prev_seg.get('type')} -> {curr_seg.get('type')}"}
         
         # =====================================================================
-        # Factor 9: Incomplete sentence (weight: 0.05)
+        # Factor 9: Incomplete sentence (weight: 0.40) - DECISIVE FACTOR
         # =====================================================================
-        weight = 0.05
+        weight = 0.40  # Massive increase: if it's not done, it's not done.
         if prev_hints.get('ends_incomplete', False) and not prev_hints.get('has_terminal_punctuation', True):
             total_score += weight
             breakdown["incomplete_sentence"] = {"score": weight, "max": weight, 
@@ -331,11 +350,8 @@ class ContinuationDetector:
         
         # =====================================================================
         # Factor 10: STRONG COMBINATION - Incomplete + Lowercase start
-        # This is the strongest cross-page continuation signal
-        # When prev ends without punctuation AND curr starts lowercase, it's almost
-        # certainly a continuation, even if position/column checks fail
         # =====================================================================
-        weight = 0.20  # High weight for this strong signal
+        weight = 0.30  # Increased from 0.20
         prev_incomplete = prev_hints.get('ends_incomplete', False) and not prev_hints.get('has_terminal_punctuation', True)
         curr_lowercase = curr_hints.get('starts_lowercase', False)
         
@@ -350,6 +366,33 @@ class ContinuationDetector:
                 "score": 0, "max": weight, 
                 "detail": "no strong continuation pattern"
             }
+
+        # =====================================================================
+        # Factor 11: List Item Continuation (weight: 0.50)
+        # =====================================================================
+        # New structural rule: If prev is ListItem and looks unfinished, 
+        # and curr is ListItem, almost certainly a continuation.
+        weight = 0.50
+        prev_is_list = prev_seg.get('type') == 'ListItem'
+        curr_is_list = curr_seg.get('type') == 'ListItem'
+        
+        # Check if prev list item ended abruptly (no punctuation or just comma/semicolon)
+        prev_text = prev_seg.get('text', '').strip()
+        list_incomplete = False
+        if prev_text and prev_text[-1] not in ['.', '!', '?']:
+            list_incomplete = True
+            
+        if prev_is_list and curr_is_list and list_incomplete:
+             total_score += weight
+             breakdown["list_continuation"] = {
+                 "score": weight, "max": weight,
+                 "detail": "split list item detected"
+             }
+        else:
+             breakdown["list_continuation"] = {
+                 "score": 0, "max": weight,
+                 "detail": "no list split"
+             }
         
         # Calculate summary
         breakdown["total"] = round(total_score, 3)
@@ -396,13 +439,56 @@ class ContinuationDetector:
         skipped = []
         for j in range(current_index - 1, -1, -1):
             seg = segments[j]
-            if self._is_noise_header(seg):
+            # Skip noise headers AND regular headers when looking for paragraph flow
+            # (unless the current segment is also a header, but paragraph continuation 
+            # is our primary concern here)
+            if seg.get('type') == 'Header' or self._is_noise_header(seg):
                 skipped.append(seg)
                 continue
-            # Found a non-noise segment
+            # Found a non-noise, non-header segment
             return seg, skipped
         return None, skipped
     
+    def _detect_text_style(self, seg: Dict[str, Any]) -> Dict[str, Any]:
+        """Detect text style hints for continuation matching if not provided."""
+        text = seg.get('text', '')
+        seg_type = seg.get('type', 'Paragraph')
+        text_stripped = text.rstrip() if text else ""
+        
+        # Terminal punctuation check
+        has_terminal = text_stripped.endswith(('.', '?', '!', ':', ';')) if text_stripped else False
+        
+        # Open clause check
+        words = text_stripped.rstrip('.,;:!?').split()
+        last_word = words[-1].lower() if words else ''
+        ends_with_open_clause = last_word in self.OPEN_CLAUSE_WORDS
+        
+        # Lowercase start
+        starts_lowercase = text.strip()[0].islower() if text.strip() else False
+        
+        # Starts like continuation
+        starts_like_continuation = False
+        if text.strip():
+            first_word = text.strip().split()[0].lower().rstrip('.,;:')
+            continuation_starters = {
+                'and', 'or', 'but', 'nor', 'so', 'yet', 'also', 'however',
+                'therefore', 'thus', 'hence', 'moreover', 'furthermore',
+                'which', 'that', 'who', 'where', 'when', 'while',
+                'because', 'since', 'although', 'though', 'unless',
+                'as', 'if', 'whether', 'whereas',
+            }
+            starts_like_continuation = first_word in continuation_starters or starts_lowercase
+
+        return {
+            "starts_lowercase": starts_lowercase,
+            "ends_incomplete": text and not has_terminal,
+            "ends_with_open_clause": ends_with_open_clause,
+            "starts_like_continuation": starts_like_continuation,
+            "has_terminal_punctuation": has_terminal,
+            "ends_with_hyphen": text_stripped.endswith('-'),
+            "has_fragment_pattern": text_stripped.endswith(',') or text_stripped.endswith('...')
+        }
+
     def annotate_segments(self, segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Annotate all segments with continuation markers and evidence.
